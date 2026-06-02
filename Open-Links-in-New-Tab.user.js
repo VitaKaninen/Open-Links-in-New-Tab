@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.4
+// @version     1.4.1
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -42,7 +42,6 @@
     function saveExceptions(list) {
         GM_setValue(EXCEPTIONS_KEY, JSON.stringify(list));
     }
-
 
     // ---------------- Settings Panel ----------------
     function openSettingsPanel() {
@@ -583,12 +582,18 @@ const INSERT_NEXT_EXCEPTIONS = [
     safeUpdateIndicator();
     checkDefaultEnabled(); // This will force-enable on default sites
 
+	let altDown = false;
     document.addEventListener('keydown', e => {
-        if (e.altKey && e.key.toLowerCase() === 'n') {
+        if (e.key === 'Alt') altDown = true;
+        if (altDown && e.code === 'KeyN') {
             toggleEnabled();
             e.preventDefault();
         }
     }, true);
+    document.addEventListener('keyup', e => {
+        if (e.key === 'Alt') altDown = false;
+    }, true);
+    window.addEventListener('blur', () => { altDown = false; }, true);
 
     const blankObserver = new MutationObserver(debouncedRemove);
     if (document.body) {
