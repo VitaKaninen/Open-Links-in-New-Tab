@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.4.1
+// @version     1.4.2
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -378,7 +378,7 @@
     }
 
     GM_registerMenuCommand('Settings', openSettingsPanel);
-	GM_registerMenuCommand('Toggle for this tab', () => { toggleEnabled(); });
+	// GM_registerMenuCommand('Toggle for this tab', () => { toggleEnabled(); });
 
   // ---------------- Insert Next-To-Parent Exceptions ----------------
 const INSERT_NEXT_EXCEPTIONS = [
