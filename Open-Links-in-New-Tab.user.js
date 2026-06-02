@@ -29,13 +29,20 @@
         try { return JSON.parse(stored); } catch (_) { return []; }
     }
 
-    function saveActiveSites(list) {
+	function saveActiveSites(list) {
         GM_setValue(SITES_KEY, JSON.stringify(list));
+    }
+
+    function getExceptions() {
+        const stored = GM_getValue(EXCEPTIONS_KEY, null);
+        if (stored === null) return [];
+        try { return JSON.parse(stored); } catch (_) { return []; }
     }
 
     function saveExceptions(list) {
         GM_setValue(EXCEPTIONS_KEY, JSON.stringify(list));
     }
+
 
     // ---------------- Settings Panel ----------------
     function openSettingsPanel() {
