@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.4.2
+// @version     1.4.3
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -47,10 +47,24 @@
     function openSettingsPanel() {
         if (document.getElementById('gm-newtab-settings')) return;
 
+        // Host element + Shadow DOM so the host page's CSS can't cascade into
+        // the panel. Page selectors (div/button/input/* rules, inherited props)
+        // don't cross the shadow boundary, so the UI renders consistently
+        // regardless of which site it's opened on.
+        const host = document.createElement('div');
+        host.id = 'gm-newtab-settings';
+        host.style.cssText = 'all: initial;';
+        const root = host.attachShadow({ mode: 'open' });
+
+        // Reset inherited properties (font, color, line-height, etc.) at the
+        // shadow boundary; explicit styles below build the look from scratch.
+        const resetStyle = document.createElement('style');
+        resetStyle.textContent = ':host { all: initial; } * { box-sizing: border-box; }';
+        root.appendChild(resetStyle);
+
         const overlay = document.createElement('div');
-        overlay.id = 'gm-newtab-settings';
         overlay.style.cssText = `
-            all: initial; position: fixed; inset: 0; z-index: 2147483646;
+            position: fixed; inset: 0; z-index: 2147483646;
             background: rgba(0,0,0,0.6); display: flex;
             align-items: center; justify-content: center; font-family: system-ui, sans-serif;
         `;
@@ -366,15 +380,16 @@
             background: #45475a; color: #cdd6f4; font-weight: 600;
             font-size: 13px; cursor: pointer; margin-top: 4px;
         `;
-        closeBtn.addEventListener('click', () => overlay.remove());
-        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+        closeBtn.addEventListener('click', () => host.remove());
+        overlay.addEventListener('click', e => { if (e.target === overlay) host.remove(); });
 
         panel.appendChild(title);
         panel.appendChild(tabBar);
         panel.appendChild(tabContents);
         panel.appendChild(closeBtn);
         overlay.appendChild(panel);
-        document.documentElement.appendChild(overlay);
+        root.appendChild(overlay);
+        document.documentElement.appendChild(host);
     }
 
     GM_registerMenuCommand('Settings', openSettingsPanel);
