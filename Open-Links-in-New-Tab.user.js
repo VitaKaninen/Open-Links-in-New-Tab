@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.4.3
+// @version     1.5.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -21,6 +21,8 @@
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
+    const PAGE_EXCEPTIONS_KEY = 'pageExceptions';
+    const INSERT_NEXT_KEY = 'insertNextSites';
 
     // ---------------- Site List (persisted) ----------------
     function getActiveSites() {
@@ -41,6 +43,26 @@
 
     function saveExceptions(list) {
         GM_setValue(EXCEPTIONS_KEY, JSON.stringify(list));
+    }
+
+    function getPageExceptions() {
+        const stored = GM_getValue(PAGE_EXCEPTIONS_KEY, null);
+        if (stored === null) return [];
+        try { return JSON.parse(stored); } catch (_) { return []; }
+    }
+
+    function savePageExceptions(list) {
+        GM_setValue(PAGE_EXCEPTIONS_KEY, JSON.stringify(list));
+    }
+
+    function getInsertNextSites() {
+        const stored = GM_getValue(INSERT_NEXT_KEY, null);
+        if (stored === null) return ['reddit.com']; // default seed (was hardcoded)
+        try { return JSON.parse(stored); } catch (_) { return ['reddit.com']; }
+    }
+
+    function saveInsertNextSites(list) {
+        GM_setValue(INSERT_NEXT_KEY, JSON.stringify(list));
     }
 
     // ---------------- Settings Panel ----------------
@@ -83,7 +105,7 @@
 
         // Tabs
         const tabBar = document.createElement('div');
-        tabBar.style.cssText = 'display: flex; gap: 4px; border-bottom: 1px solid #45475a; padding-bottom: 8px;';
+        tabBar.style.cssText = 'display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid #45475a; padding-bottom: 8px;';
 
         const tabContents = document.createElement('div');
         tabContents.style.cssText = 'flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 10px;';
@@ -115,6 +137,10 @@
         function buildSection(cfg) {
             const section = document.createElement('div');
             section.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+
+            const desc = document.createElement('div');
+            desc.style.cssText = 'font-size: 12px; color: #9399b2; line-height: 1.45;';
+            desc.innerHTML = cfg.description || '';
 
             const addRow = document.createElement('div');
             addRow.style.cssText = 'display: flex; gap: 6px;';
@@ -328,6 +354,7 @@
             ioRow.appendChild(ioStatus);
 
             renderList();
+            section.appendChild(desc);
             section.appendChild(addRow);
             section.appendChild(list);
             section.appendChild(ioRow);
@@ -335,6 +362,7 @@
         }
 
         const sitesSection = buildSection({
+            description: 'Sites where the script is <b>always ON</b>, so links open in a new tab automatically.<br>Enter a domain. Examples: <i>example.com</i>, <i>news.ycombinator.com</i>',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This Site',
             addCurrentTitle: 'Add the current site (' + location.hostname + ')',
@@ -347,6 +375,7 @@
         sitesSection.style.display = 'flex';
 
         const exceptionsSection = buildSection({
+            description: 'Links matching these are <b>not</b> opened in a new tab — they open normally. Matches the <b>link you click</b> by domain and optional path.<br>Examples: <i>mail.google.com</i>, <i>example.com/logout</i>',
             placeholder: 'e.g. example.com/path',
             addCurrentLabel: '+ This Page',
             addCurrentTitle: 'Add the current page (' + location.hostname + location.pathname + ')',
@@ -358,20 +387,51 @@
         });
         exceptionsSection.style.display = 'none';
 
+        const pageExceptionsSection = buildSection({
+            description: 'Pages whose URL <b>starts with</b> one of these are left alone — the script goes dormant, so every link on that page reuses the current tab.<br>Enter a URL prefix. Examples: <i>https://www.youtube.com/watch?v=</i>, <i>https://www.google.com/search</i>',
+            placeholder: 'e.g. https://www.youtube.com/watch?v=',
+            addCurrentLabel: '+ This Page',
+            addCurrentTitle: 'Add the current page URL (' + location.href + ')',
+            exportFilename: 'open-links-new-tab_page-exceptions.txt',
+            getItems: getPageExceptions,
+            saveItems: savePageExceptions,
+            normalize: raw => raw.trim(),
+            currentValue: () => location.href
+        });
+        pageExceptionsSection.style.display = 'none';
+
+        const tabPlacementSection = buildSection({
+            description: 'New tabs opened from these sites appear <b>next to the current tab</b> instead of at the end of the tab bar.<br>Enter a domain. Examples: <i>reddit.com</i>, <i>youtube.com</i>',
+            placeholder: 'e.g. reddit.com',
+            addCurrentLabel: '+ This Site',
+            addCurrentTitle: 'Add the current site (' + location.hostname + ')',
+            exportFilename: 'open-links-new-tab_tab-placement.txt',
+            getItems: getInsertNextSites,
+            saveItems: saveInsertNextSites,
+            normalize: raw => raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0],
+            currentValue: () => location.hostname.toLowerCase()
+        });
+        tabPlacementSection.style.display = 'none';
+
         const tab0 = makeTab('Active Sites', 0);
         const tab1 = makeTab('Link Exceptions', 1);
+        const tab2 = makeTab('Page Exceptions', 2);
+        const tab3 = makeTab('Tab Placement', 3);
         tabBar.appendChild(tab0);
         tabBar.appendChild(tab1);
+        tabBar.appendChild(tab2);
+        tabBar.appendChild(tab3);
 
-        const allTabs = [tab0, tab1];
-        const allContents = [sitesSection, exceptionsSection];
+        const allTabs = [tab0, tab1, tab2, tab3];
+        const allContents = [sitesSection, exceptionsSection, pageExceptionsSection, tabPlacementSection];
 
-        tab0.addEventListener('click', () => setActiveTab(0, allTabs, allContents));
-        tab1.addEventListener('click', () => setActiveTab(1, allTabs, allContents));
+        allTabs.forEach((t, i) => t.addEventListener('click', () => setActiveTab(i, allTabs, allContents)));
         setActiveTab(0, allTabs, allContents);
 
         tabContents.appendChild(sitesSection);
         tabContents.appendChild(exceptionsSection);
+        tabContents.appendChild(pageExceptionsSection);
+        tabContents.appendChild(tabPlacementSection);
 
         const closeBtn = document.createElement('button');
         closeBtn.textContent = 'Close';
@@ -395,13 +455,9 @@
     GM_registerMenuCommand('Settings', openSettingsPanel);
 	// GM_registerMenuCommand('Toggle for this tab', () => { toggleEnabled(); });
 
-  // ---------------- Insert Next-To-Parent Exceptions ----------------
-const INSERT_NEXT_EXCEPTIONS = [
-      // Domains that should open next to the parent tab
-      // 'youtube.com',
-      // 'reddit.com'
-      'reddit.com'
-];
+  // ---------------- Insert Next-To-Parent ----------------
+  // Domains whose new tabs open next to the parent are now managed in the
+  // "Tab Placement" settings tab (see getInsertNextSites / shouldInsertNext).
 
     const DOWNLOAD_EXTENSIONS = [
         '.zip', '.rar', '.7z', '.exe', '.msi',
@@ -518,13 +574,21 @@ const INSERT_NEXT_EXCEPTIONS = [
   function shouldInsertNext(url) {
     try {
         const hostname = new URL(url).hostname.toLowerCase();
-        return INSERT_NEXT_EXCEPTIONS.some(domain =>
+        return getInsertNextSites().some(domain =>
             hostname === domain || hostname.endsWith('.' + domain)
         );
     } catch (_) {
         return false;
     }
 }
+
+    function isPageExcepted() {
+        const href = location.href.toLowerCase();
+        return getPageExceptions().some(prefix => {
+            const p = prefix.trim().toLowerCase();
+            return p && href.startsWith(p);
+        });
+    }
 
     function createIndicator() {
         const svgNS = 'http://www.w3.org/2000/svg';
@@ -645,6 +709,7 @@ function openInNewTab(url) {
 }
 
     document.addEventListener('click', e => {
+        if (isPageExcepted()) return;   // page in the "Page Exceptions" list — script stays dormant here
         if (!isEnabled()) return;
         if (e.defaultPrevented) return;
         if (e.button !== 0) return;
@@ -652,41 +717,6 @@ function openInNewTab(url) {
 
         const link = e.target.closest('a[href]');
         if (!link) return;
-
-const isYT = location.hostname.includes('youtube.com') || location.hostname.includes('youtu.be');
-    if (isYT) {
-        const nextButtonSelectors = [
-            '.ytp-next-button',                     // Classic player next
-            '[aria-label="Next video"]',             // Player next video button
-            '[aria-label="Next (SHIFT+N)"]',        // Player next with keyboard hint
-            '[title="Next"]',
-            'button.yt-spec-button-shape-next'      // Newer tonal/mono variants
-        ];
-
-        // Check composed path for shadow DOM (click from deep child)
-        const path = e.composedPath ? e.composedPath() : [];
-        const isNextClick = path.some(el =>
-            el.nodeType === 1 &&  // Element node
-            nextButtonSelectors.some(sel => el.matches && el.matches(sel))
-        );
-
-        // Also check the resolved link if any
-        const linkIsNext = link && nextButtonSelectors.some(sel =>
-            link.matches(sel) || link.closest(sel)
-        );
-
-        if (isNextClick || linkIsNext) {
-            return;  // Bail out early – let YouTube handle playlist advance
-        }
-
-        // Ignore links that are part of a YouTube playlist
-        if (link && link.href) {
-            try {
-                const params = new URL(link.href).searchParams;
-                if (params.has('list')) return;
-            } catch (_) {}
-        }
-    }
 
         if (isExceptionLink(link)) return;
         if (!link.href || link.href.startsWith('javascript:')) return;
