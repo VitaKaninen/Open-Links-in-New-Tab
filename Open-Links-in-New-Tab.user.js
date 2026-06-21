@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.5.0
+// @version     1.5.1
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -138,9 +138,21 @@
             const section = document.createElement('div');
             section.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
 
+            // Build description with DOM nodes + textContent (never innerHTML —
+            // sites with a Trusted Types CSP, e.g. YouTube, throw on innerHTML).
             const desc = document.createElement('div');
             desc.style.cssText = 'font-size: 12px; color: #9399b2; line-height: 1.45;';
-            desc.innerHTML = cfg.description || '';
+            if (cfg.description) {
+                const descMain = document.createElement('div');
+                descMain.textContent = cfg.description;
+                desc.appendChild(descMain);
+            }
+            if (cfg.examples) {
+                const descEx = document.createElement('div');
+                descEx.style.cssText = 'margin-top: 4px; color: #6c7086; font-style: italic;';
+                descEx.textContent = cfg.examples;
+                desc.appendChild(descEx);
+            }
 
             const addRow = document.createElement('div');
             addRow.style.cssText = 'display: flex; gap: 6px;';
@@ -362,7 +374,8 @@
         }
 
         const sitesSection = buildSection({
-            description: 'Sites where the script is <b>always ON</b>, so links open in a new tab automatically.<br>Enter a domain. Examples: <i>example.com</i>, <i>news.ycombinator.com</i>',
+            description: 'Sites where the script is always ON, so links open in a new tab automatically. Enter a domain.',
+            examples: 'Examples: example.com, news.ycombinator.com',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This Site',
             addCurrentTitle: 'Add the current site (' + location.hostname + ')',
@@ -375,7 +388,8 @@
         sitesSection.style.display = 'flex';
 
         const exceptionsSection = buildSection({
-            description: 'Links matching these are <b>not</b> opened in a new tab — they open normally. Matches the <b>link you click</b> by domain and optional path.<br>Examples: <i>mail.google.com</i>, <i>example.com/logout</i>',
+            description: 'Links matching these are NOT opened in a new tab — they open normally. Matches the link you click, by domain and optional path.',
+            examples: 'Examples: mail.google.com, example.com/logout',
             placeholder: 'e.g. example.com/path',
             addCurrentLabel: '+ This Page',
             addCurrentTitle: 'Add the current page (' + location.hostname + location.pathname + ')',
@@ -388,7 +402,8 @@
         exceptionsSection.style.display = 'none';
 
         const pageExceptionsSection = buildSection({
-            description: 'Pages whose URL <b>starts with</b> one of these are left alone — the script goes dormant, so every link on that page reuses the current tab.<br>Enter a URL prefix. Examples: <i>https://www.youtube.com/watch?v=</i>, <i>https://www.google.com/search</i>',
+            description: 'Pages whose URL starts with one of these are left alone — the script goes dormant, so every link on that page reuses the current tab. Enter a URL prefix.',
+            examples: 'Examples: https://www.youtube.com/watch?v=  ·  https://www.google.com/search',
             placeholder: 'e.g. https://www.youtube.com/watch?v=',
             addCurrentLabel: '+ This Page',
             addCurrentTitle: 'Add the current page URL (' + location.href + ')',
@@ -401,7 +416,8 @@
         pageExceptionsSection.style.display = 'none';
 
         const tabPlacementSection = buildSection({
-            description: 'New tabs opened from these sites appear <b>next to the current tab</b> instead of at the end of the tab bar.<br>Enter a domain. Examples: <i>reddit.com</i>, <i>youtube.com</i>',
+            description: 'New tabs opened from these sites appear next to the current tab instead of at the end of the tab bar. Enter a domain.',
+            examples: 'Examples: reddit.com, youtube.com',
             placeholder: 'e.g. reddit.com',
             addCurrentLabel: '+ This Site',
             addCurrentTitle: 'Add the current site (' + location.hostname + ')',
