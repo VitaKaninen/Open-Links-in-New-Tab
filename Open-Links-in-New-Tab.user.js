@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.5.1
+// @version     1.6.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -565,6 +565,9 @@
         const url = link.href.toLowerCase();
         const hostname = link.hostname.toLowerCase();
         const path = link.pathname.toLowerCase();
+
+        // Always-on suffix exceptions: links ending in these open normally.
+        if (url.endsWith('/?ctp=2')) return true;
 
         return getExceptions().some(rule => {
             const r = rule.toLowerCase();
