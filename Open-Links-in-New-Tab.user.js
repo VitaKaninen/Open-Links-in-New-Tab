@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.6.1
+// @version     1.6.2
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -567,8 +567,8 @@
         const path = link.pathname.toLowerCase();
 
         // Always-on suffix exceptions: links ending in these open normally.
-        // e.g. Steam discussion pagination: …/?ctp=3 (any page number).
-        if (/\/\?ctp=\d+$/.test(url)) return true;
+        // e.g. Steam discussion pagination: …/?ctp=3 or …/?fp=2 (any page number).
+        if (/\/\?(ctp|fp)=\d+$/.test(url)) return true;
 
         return getExceptions().some(rule => {
             const r = rule.toLowerCase();
