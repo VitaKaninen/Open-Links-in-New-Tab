@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.6.2
+// @version     1.7.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -665,6 +665,12 @@
     }
 
     function removeBlankTargets() {
+        // Only take over target="_blank" links when the script is actually
+        // active on this page. When it's off (or the page is excepted), leave
+        // the page's native new-window links alone — otherwise stripping the
+        // target makes them open in the same tab even though the click handler
+        // below never fires to reopen them in a new one.
+        if (!isEnabled() || isPageExcepted()) return;
         document.querySelectorAll('a[target="_blank"]').forEach(link => {
             if (!isExceptionLink(link)) {
                 link.removeAttribute('target');
