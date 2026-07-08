@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.7.0
+// @version     1.8.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -136,7 +136,7 @@
 
         function buildSection(cfg) {
             const section = document.createElement('div');
-            section.style.cssText = 'display: flex; flex-direction: column; gap: 8px;';
+            section.style.cssText = 'display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0;';
 
             // Build description with DOM nodes + textContent (never innerHTML —
             // sites with a Trusted Types CSP, e.g. YouTube, throw on innerHTML).
@@ -189,7 +189,7 @@
             const list = document.createElement('div');
             list.style.cssText = `
                 overflow-y: auto; display: flex; flex-direction: column; gap: 5px;
-                max-height: 300px; padding-right: 4px;
+                flex: 1; min-height: 0; padding-right: 4px;
             `;
 
             function renderList() {
