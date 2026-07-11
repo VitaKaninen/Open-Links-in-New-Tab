@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.9.0
+// @version     1.9.1
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -551,17 +551,16 @@
             if (/[?&][^=]*-page=\d+(?:[&#]|$)/.test(url)) return true;
             if (/\bpage\d+(\.\w+)?\/?$/.test(url)) return true;
             if (/\/portal\/\d+\/?$/.test(url)) return true;
+            // A URL ending in a bare number is ambiguous — it can be a page
+            // (…/blog/2) or a content id (…/mods/232). Disambiguate with the
+            // link's own text instead of any site-specific list: a real
+            // pagination control is *labelled with the page number*, so treat
+            // it as pagination only when the visible text equals that trailing
+            // number. A content link is labelled with a title, so it won't
+            // match and will open in a new tab. (Word controls like "Next"/"›"
+            // are already handled by the text list above.)
             const numericEndMatch = url.match(/\/(\d+)\/?$/);
-            if (numericEndMatch) {
-                const pageNum = parseInt(numericEndMatch[1], 10);
-                // A trailing number after a content-resource segment is a
-                // resource ID, NOT a page — e.g. Nexus Mods …/mods/240,
-                // …/users/12. Those must still open in a new tab. Only treat a
-                // bare trailing number as pagination when it doesn't follow one
-                // of these nouns. (Nexus mod links regressed before this guard.)
-                const isResourceId = /\/(mods?|files?|images?|videos?|articles?|posts?|comments?|reviews?|profiles?|users?|members?|products?|items?|news|id)\/\d+\/?$/.test(url);
-                if (!isNaN(pageNum) && pageNum <= 999 && !isResourceId) return true;
-            }
+            if (numericEndMatch && (link.textContent || '').trim() === numericEndMatch[1]) return true;
         }
         return false;
     }
