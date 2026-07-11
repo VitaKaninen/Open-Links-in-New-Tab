@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.8.0
+// @version     1.9.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -554,7 +554,13 @@
             const numericEndMatch = url.match(/\/(\d+)\/?$/);
             if (numericEndMatch) {
                 const pageNum = parseInt(numericEndMatch[1], 10);
-                if (!isNaN(pageNum) && pageNum <= 999) return true;
+                // A trailing number after a content-resource segment is a
+                // resource ID, NOT a page — e.g. Nexus Mods …/mods/240,
+                // …/users/12. Those must still open in a new tab. Only treat a
+                // bare trailing number as pagination when it doesn't follow one
+                // of these nouns. (Nexus mod links regressed before this guard.)
+                const isResourceId = /\/(mods?|files?|images?|videos?|articles?|posts?|comments?|reviews?|profiles?|users?|members?|products?|items?|news|id)\/\d+\/?$/.test(url);
+                if (!isNaN(pageNum) && pageNum <= 999 && !isResourceId) return true;
             }
         }
         return false;
@@ -652,7 +658,11 @@
     }
 
     function updateIndicator() {
-        if (!indicator) createIndicator();
+        // Recreate if the node was never made OR was torn out of the DOM.
+        // Sites that render the whole <html> with a framework (e.g. Nexus Mods
+        // hydrates the full document with React) discard the indicator we
+        // injected at document-end; re-add it once the framework has settled.
+        if (!indicator || !indicator.isConnected) createIndicator();
         indicator.style.display = isEnabled() ? 'block' : 'none';
     }
 
@@ -687,6 +697,11 @@
     safeUpdateIndicator();
     checkDefaultEnabled(); // This will force-enable on default sites
 
+    // On full-document frameworks the indicator we just injected gets discarded
+    // during hydration; re-check a few times after load so it comes back once
+    // the framework has finished rendering.
+    [400, 1200, 3000].forEach(t => setTimeout(safeUpdateIndicator, t));
+
 	let altDown = false;
     document.addEventListener('keydown', e => {
         if (e.key === 'Alt') altDown = true;
@@ -700,7 +715,11 @@
     }, true);
     window.addEventListener('blur', () => { altDown = false; }, true);
 
-    const blankObserver = new MutationObserver(debouncedRemove);
+    const blankObserver = new MutationObserver(() => {
+        debouncedRemove();
+        // Re-add the indicator if a framework re-render tore it out.
+        if (!indicator || !indicator.isConnected) safeUpdateIndicator();
+    });
     if (document.body) {
         blankObserver.observe(document.body, {
             childList: true,
