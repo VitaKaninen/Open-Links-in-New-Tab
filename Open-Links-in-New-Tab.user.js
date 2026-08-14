@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.12.0
+// @version     1.13.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -564,7 +564,9 @@
             if (/[?&](page|paged|p|pg|start|offset)=\d+(?:[&#]|$)/.test(url)) return true;
             if (/[?&][^=]*-page=\d+(?:[&#]|$)/.test(url)) return true;
             if (/\/(page|p)\/\d+\/?$/.test(path)) return true;
-            if (/\bpage\d+(\.\w+)?\/?$/.test(path)) return true;
+            // page2 / page-2 / page_2 / page2.html — the separator between the
+            // word and the number is optional, and sites use all three forms.
+            if (/\bpage[-_]?\d+(\.\w+)?\/?$/.test(path)) return true;
             if (/\/portal\/\d+\/?$/.test(path)) return true;
             // Sort/feed segment followed by a number is always pagination —
             // …/new/2, …/top/3, …/hot/2. These words are sort orders, never
