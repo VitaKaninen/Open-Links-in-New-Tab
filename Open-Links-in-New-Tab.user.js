@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.9.1
+// @version     1.10.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -551,6 +551,10 @@
             if (/[?&][^=]*-page=\d+(?:[&#]|$)/.test(url)) return true;
             if (/\bpage\d+(\.\w+)?\/?$/.test(url)) return true;
             if (/\/portal\/\d+\/?$/.test(url)) return true;
+            // Sort/feed segment followed by a number is always pagination —
+            // …/new/2, …/top/3, …/hot/2. These words are sort orders, never
+            // content slugs, so the trailing number can't be a content id.
+            if (/\/(new|newest|latest|recent|top|hot|best|rising|popular|trending|all|active|unanswered)\/\d+\/?$/.test(url)) return true;
             // A URL ending in a bare number is ambiguous — it can be a page
             // (…/blog/2) or a content id (…/mods/232). Disambiguate with the
             // link's own text instead of any site-specific list: a real
@@ -559,8 +563,14 @@
             // number. A content link is labelled with a title, so it won't
             // match and will open in a new tab. (Word controls like "Next"/"›"
             // are already handled by the text list above.)
+            // Whitespace is collapsed first — nested markup puts newlines and
+            // indentation inside the anchor, so a raw trim() misses "\n  2\n".
+            // "Page 2" counts too; it's still a number-labelled control.
             const numericEndMatch = url.match(/\/(\d+)\/?$/);
-            if (numericEndMatch && (link.textContent || '').trim() === numericEndMatch[1]) return true;
+            if (numericEndMatch) {
+                const label = (link.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                if (label === numericEndMatch[1] || label === 'page ' + numericEndMatch[1]) return true;
+            }
         }
         return false;
     }
