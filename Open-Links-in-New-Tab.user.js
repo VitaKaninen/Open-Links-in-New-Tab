@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.11.0
+// @version     1.12.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -556,15 +556,20 @@
 
         if (link.href) {
             const url = link.href.toLowerCase();
+            // Path rules must be tested against the PATH, not the full href —
+            // their `$` anchor can never match when a query string or hash
+            // follows the page number (…/page/3/?s=searchterm, …/new/2#top).
+            const path = (link.pathname || '').toLowerCase();
+
             if (/[?&](page|paged|p|pg|start|offset)=\d+(?:[&#]|$)/.test(url)) return true;
-            if (/\/(page|p)\/\d+\/?$/.test(url)) return true;
             if (/[?&][^=]*-page=\d+(?:[&#]|$)/.test(url)) return true;
-            if (/\bpage\d+(\.\w+)?\/?$/.test(url)) return true;
-            if (/\/portal\/\d+\/?$/.test(url)) return true;
+            if (/\/(page|p)\/\d+\/?$/.test(path)) return true;
+            if (/\bpage\d+(\.\w+)?\/?$/.test(path)) return true;
+            if (/\/portal\/\d+\/?$/.test(path)) return true;
             // Sort/feed segment followed by a number is always pagination —
             // …/new/2, …/top/3, …/hot/2. These words are sort orders, never
             // content slugs, so the trailing number can't be a content id.
-            if (/\/(new|newest|latest|recent|top|hot|best|rising|popular|trending|all|active|unanswered)\/\d+\/?$/.test(url)) return true;
+            if (/\/(new|newest|latest|recent|top|hot|best|rising|popular|trending|all|active|unanswered)\/\d+\/?$/.test(path)) return true;
             // A URL ending in a bare number is ambiguous — it can be a page
             // (…/blog/2) or a content id (…/mods/232). Disambiguate with the
             // link's own text instead of any site-specific list: a real
@@ -576,7 +581,7 @@
             // Whitespace is collapsed first — nested markup puts newlines and
             // indentation inside the anchor, so a raw trim() misses "\n  2\n".
             // "Page 2" counts too; it's still a number-labelled control.
-            const numericEndMatch = url.match(/\/(\d+)\/?$/);
+            const numericEndMatch = path.match(/\/(\d+)\/?$/);
             if (numericEndMatch) {
                 const label = (link.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
                 if (label === numericEndMatch[1] || label === 'page ' + numericEndMatch[1]) return true;
