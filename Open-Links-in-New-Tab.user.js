@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.10.0
+// @version     1.11.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -527,15 +527,25 @@
 
     function isNextPageLink(link) {
         if (link.textContent) {
-            const text = link.textContent.trim().toLowerCase();
+            // Collapse whitespace: nested markup (a <span> inside the <a>)
+            // puts newlines and indentation in textContent, so a bare trim()
+            // leaves "\n  Next\n" unmatched.
+            const text = link.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
             const validTexts = new Set([
-                'next', 'more', 'older', 'previous',
+                'next', 'more', 'older', 'previous', 'prev',
                 'next page', 'previous page', 'older posts', 'newer posts',
                 'read more', 'load more posts', 'go to next page',
                 'view older posts', 'continue reading', 'next article',
                 'next ›', 'previous ›', 'next →', 'previous →',
                 'next >>', 'previous >>', '›', '→', '>>', '»',
+                'prev ‹', 'previous ‹', '‹', '←', '<<', '«',
                 'new', 'best', 'hot', 'top', 'rising', 'comments',
+                // Sort-order controls in a pagination bar, same family as the
+                // line above: they re-render the current listing, not content.
+                'newest', 'oldest', 'latest', 'recent', 'popular', 'trending',
+                'active', 'unanswered', 'first', 'last',
+                // Page-range ellipsis between number groups (…  2 3 4 … 11948)
+                '…', '...',
                 'reply',
                 'show more related videos',
                 'refresh'
