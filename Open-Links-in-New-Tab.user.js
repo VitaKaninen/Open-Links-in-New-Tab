@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.13.0
+// @version     1.14.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -63,6 +63,24 @@
 
     function saveInsertNextSites(list) {
         GM_setValue(INSERT_NEXT_KEY, JSON.stringify(list));
+    }
+
+    // ---------------- List Ordering ----------------
+    // Every settings list is shown and stored alphabetically, so scanning for
+    // "is this site already in here?" is a straight read down the column.
+    // The scheme and a leading "www." are ignored for the comparison — without
+    // that, Page Exceptions (full URLs) would all clump under "https://" and
+    // sort by nothing useful.
+    function sortKey(value) {
+        return String(value).toLowerCase()
+            .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+            .replace(/^www\./, '');
+    }
+
+    function sortList(list) {
+        return list.slice().sort((a, b) =>
+            sortKey(a).localeCompare(sortKey(b), undefined, { numeric: true, sensitivity: 'base' })
+        );
     }
 
     // ---------------- Settings Panel ----------------
@@ -192,9 +210,15 @@
                 flex: 1; min-height: 0; padding-right: 4px;
             `;
 
+            // Persist sorted as well as display sorted, so exported .txt files
+            // come out in the same order the panel shows.
+            function saveSorted(items) {
+                cfg.saveItems(sortList(items));
+            }
+
             function renderList() {
                 while (list.firstChild) list.removeChild(list.firstChild);
-                const items = cfg.getItems();
+                const items = sortList(cfg.getItems());
                 if (items.length === 0) {
                     const empty = document.createElement('div');
                     empty.style.cssText = 'color: #6c7086; font-size: 13px; text-align: center; padding: 12px 0;';
@@ -202,7 +226,7 @@
                     list.appendChild(empty);
                     return;
                 }
-                items.forEach((item, i) => {
+                items.forEach(item => {
                     const row = document.createElement('div');
                     row.style.cssText = `
                         display: flex; align-items: center; justify-content: space-between;
@@ -220,8 +244,12 @@
                     `;
                     removeBtn.title = 'Remove ' + item;
                     removeBtn.addEventListener('click', () => {
-                        const updated = cfg.getItems().filter((_, j) => j !== i);
-                        cfg.saveItems(updated);
+                        // Remove by value, not by index: the rendered order is
+                        // sorted while stored order may not be (lists saved by
+                        // an earlier version), so an index would delete the
+                        // wrong entry. Entries are unique — addItem dedupes.
+                        const updated = cfg.getItems().filter(existing => existing !== item);
+                        saveSorted(updated);
                         renderList();
                     });
 
@@ -237,7 +265,7 @@
                 const items = cfg.getItems();
                 if (items.includes(value)) return;
                 items.push(value);
-                cfg.saveItems(items);
+                saveSorted(items);
                 renderList();
                 input.value = '';
             }
@@ -279,7 +307,7 @@
             }
 
             exportBtn.addEventListener('click', async () => {
-                const items = cfg.getItems();
+                const items = sortList(cfg.getItems());
                 if (items.length === 0) {
                     flashStatus('Nothing to export.', '#f38ba8');
                     return;
@@ -349,7 +377,7 @@
                                 added++;
                             }
                         });
-                        cfg.saveItems(merged);
+                        saveSorted(merged);
                         renderList();
                         flashStatus('Imported ' + added + ' new (' + (lines.length - added) + ' duplicate).');
                     };
