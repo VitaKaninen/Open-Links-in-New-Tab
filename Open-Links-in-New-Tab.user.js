@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.15.0
+// @version     1.16.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,16 +17,28 @@
 
 (function() {
     'use strict';
-    if (window !== window.top) return;
-    const SCRIPT_VERSION = '1.15.0';
+    const SCRIPT_VERSION = '1.16.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
     const PAGE_EXCEPTIONS_KEY = 'pageExceptions';
     const INSERT_NEXT_KEY = 'insertNextSites';
-    const DIAG_LOGGING_KEY = 'diagnosticLogging';
+    const DIAG_LOGGING_KEY = 'diagnosticLogging'; // v1.15.0 boolean, still read for migration
+    const DIAG_MODE_KEY = 'diagnosticMode';
     const DIAG_LOG_KEY = 'diagnosticLog';
     const DIAG_LOG_MAX = 40;
+
+    // The script only *acts* in the top frame, but a click inside an iframe is
+    // invisible to the top-frame handler — which in the panel looks exactly
+    // like "nothing happened at all". So subframes still install the deep
+    // probe, letting that cause say its own name instead of staying silent.
+    // This check sits below the const declarations on purpose: returning above
+    // them would leave every one in the temporal dead zone, and the probe
+    // needs the storage keys.
+    if (window !== window.top) {
+        installFrameProbe();
+        return;
+    }
 
     // ---------------- Site List (persisted) ----------------
     function getActiveSites() {
@@ -77,13 +89,21 @@
     //     navigates away still leaves a readable entry behind;
     //   - the panel can show the Active Sites / Exceptions lists too, which
     //     page-console code can never reach — GM storage is outside the page.
-    function isDiagLogging() {
-        return GM_getValue(DIAG_LOGGING_KEY, false) === true;
+    // 'off' | 'on' (link clicks the script sees) | 'deep' (every click, plus
+    // the clicks it never sees — see the probe section).
+    function getDiagMode() {
+        const mode = GM_getValue(DIAG_MODE_KEY, null);
+        if (mode === 'off' || mode === 'on' || mode === 'deep') return mode;
+        return GM_getValue(DIAG_LOGGING_KEY, false) === true ? 'on' : 'off';
     }
 
-    function setDiagLogging(on) {
-        GM_setValue(DIAG_LOGGING_KEY, on === true);
+    function setDiagMode(mode) {
+        GM_setValue(DIAG_MODE_KEY, mode);
         safeUpdateIndicator();
+    }
+
+    function isDiagLogging() {
+        return getDiagMode() !== 'off';
     }
 
     function getDiagLog() {
@@ -104,22 +124,114 @@
         return s.length > max ? s.slice(0, max - 1) + '…' : s;
     }
 
-    function recordDiagEntry(link, verdict) {
+    function appendDiagEntry(entry) {
         try {
             const log = getDiagLog();
-            log.unshift({
-                t: Date.now(),
-                page: truncate(location.href, 300),
-                href: truncate(link.href, 300),
-                text: truncate((link.textContent || '').replace(/\s+/g, ' ').trim(), 80),
-                action: verdict.action,
-                reason: verdict.reason,
-                rule: verdict.rule || ''
-            });
+            log.unshift(entry);
             GM_setValue(DIAG_LOG_KEY, JSON.stringify(log.slice(0, DIAG_LOG_MAX)));
         } catch (_) {
             // Diagnostics must never break a click.
         }
+    }
+
+    function recordDiagEntry(link, verdict) {
+        appendDiagEntry({
+            t: Date.now(),
+            page: truncate(location.href, 300),
+            href: truncate(link.href, 300),
+            text: truncate((link.textContent || '').replace(/\s+/g, ' ').trim(), 80),
+            action: verdict.action,
+            reason: verdict.reason,
+            rule: verdict.rule || ''
+        });
+    }
+
+    // ---------------- Deep Probe ----------------
+    // "Nothing was logged" is the hardest symptom to act on, because every
+    // cause produces the same silence. This probe sits at window/capture —
+    // ahead of every document-level listener, so it still sees clicks that
+    // something else stops before they reach the handler — and names which
+    // cause applies. It never calls preventDefault or stopPropagation, so it
+    // cannot change what the page does.
+    let probeToken = 0;
+    let loggedToken = -1;
+
+    function describeNode(node) {
+        if (!node || !node.tagName) return String((node && node.nodeName) || 'unknown');
+        let out = node.tagName.toLowerCase();
+        if (node.id) out += '#' + node.id;
+        const cls = (typeof node.className === 'string' ? node.className : '')
+            .trim().split(/\s+/).filter(Boolean).slice(0, 2);
+        if (cls.length) out += '.' + cls.join('.');
+        return out;
+    }
+
+    function pathAnchorOf(e) {
+        // composedPath() pierces shadow roots; e.target.closest() cannot. An
+        // anchor visible here but not there means the link lives in a shadow
+        // tree, which is a real and otherwise invisible failure mode.
+        const path = (typeof e.composedPath === 'function') ? e.composedPath() : [];
+        for (const node of path) {
+            if (node && node.tagName === 'A' && node.getAttribute && node.getAttribute('href')) return node;
+        }
+        return null;
+    }
+
+    function probeClick(e) {
+        if (getDiagMode() !== 'deep') return;
+        const token = ++probeToken;
+        const shadowAnchor = pathAnchorOf(e);
+        const plainAnchor = (e.target && e.target.closest) ? e.target.closest('a[href]') : null;
+        const targetDesc = describeNode(e.target);
+        const button = e.button;
+
+        // Runs after the whole dispatch, so it knows whether the real handler
+        // logged this click. If it did, stay quiet — no duplicate entries.
+        setTimeout(() => {
+            if (loggedToken === token) return;
+
+            let reason, rule;
+            if (button !== 0) {
+                reason = 'Not a plain left-click, so the script ignores it';
+                rule = 'mouse button ' + button;
+            } else if (!shadowAnchor && !plainAnchor) {
+                reason = 'Nothing in the click path is an <a href> — the site navigates with JavaScript, so there is no link for this script to take over';
+                rule = 'clicked: ' + targetDesc;
+            } else if (shadowAnchor && !plainAnchor) {
+                reason = 'The link sits inside a shadow root, where this script cannot reach it';
+                rule = 'clicked: ' + targetDesc;
+            } else {
+                reason = 'The click never reached this script — something stopped propagation between window and document';
+                rule = 'another userscript or extension, listening at window level';
+            }
+
+            const anchor = shadowAnchor || plainAnchor;
+            appendDiagEntry({
+                t: Date.now(),
+                page: truncate(location.href, 300),
+                href: anchor ? truncate(anchor.href, 300) : '(no link)',
+                text: truncate(((anchor || e.target).textContent || '').replace(/\s+/g, ' ').trim(), 80),
+                action: 'probe',
+                reason: reason,
+                rule: rule
+            });
+        }, 0);
+    }
+
+    function installFrameProbe() {
+        window.addEventListener('click', e => {
+            if (getDiagMode() !== 'deep') return;
+            const anchor = pathAnchorOf(e) || ((e.target && e.target.closest) ? e.target.closest('a[href]') : null);
+            appendDiagEntry({
+                t: Date.now(),
+                page: truncate(location.href, 300),
+                href: anchor ? truncate(anchor.href, 300) : '(no link)',
+                text: truncate(((anchor || e.target).textContent || '').replace(/\s+/g, ' ').trim(), 80),
+                action: 'probe',
+                reason: 'Click happened inside an iframe, where the script deliberately does not run',
+                rule: 'frame: ' + truncate(location.href, 120)
+            });
+        }, true);
     }
 
     // ---------------- List Ordering ----------------
@@ -635,7 +747,8 @@
             lines.push('List sizes: ' + getActiveSites().length + ' active sites, ' + getExceptions().length +
                        ' link exceptions, ' + getPageExceptions().length + ' page exceptions, ' +
                        getInsertNextSites().length + ' tab-placement sites');
-            lines.push('Click logging: ' + (isDiagLogging() ? 'ON' : 'OFF'));
+            lines.push('Click logging: ' + getDiagMode().toUpperCase());
+            lines.push('Frame: ' + (window === window.top ? 'top-level document' : 'inside an iframe'));
             return { lines, pageRule, siteRule };
         }
 
@@ -679,16 +792,23 @@
             while (logBox.firstChild) logBox.removeChild(logBox.firstChild);
             const entries = getDiagLog();
 
+            const mode = getDiagMode();
             const hint = document.createElement('div');
             hint.style.cssText = 'font-size: 12px; color: #9399b2; line-height: 1.45;';
-            hint.textContent = isDiagLogging()
-                ? 'Logging is ON. Click the link that misbehaves, then reopen this panel — the entry survives navigating away.'
-                : 'Logging is OFF. Turn it on, click the link that misbehaves, then reopen this panel.';
+            if (mode === 'deep') {
+                hint.textContent = 'Logging is DEEP. Every left-click is recorded, including clicks this script never sees — use this when normal logging shows nothing. Click the link that misbehaves, then reopen this panel.';
+            } else if (mode === 'on') {
+                hint.textContent = 'Logging is ON. Click the link that misbehaves, then reopen this panel — the entry survives navigating away. If a click records nothing at all, switch to DEEP.';
+            } else {
+                hint.textContent = 'Logging is OFF. Turn it on, click the link that misbehaves, then reopen this panel.';
+            }
             logBox.appendChild(hint);
 
             const caveat = document.createElement('div');
             caveat.style.cssText = 'font-size: 12px; color: #6c7086; font-style: italic; line-height: 1.45;';
-            caveat.textContent = 'No entry at all for a click means it never reached this script: either the element is not an <a href>, or something running earlier (another userscript or extension, at window level) swallowed the event.';
+            caveat.textContent = mode === 'deep'
+                ? 'Still nothing after clicking in DEEP mode? Then the script is not running on this page at all — check that the N indicator appears, and that Tampermonkey is enabled and not blocked here.'
+                : 'No entry at all for a click means it never reached this script. DEEP mode identifies which of the causes it is.';
             logBox.appendChild(caveat);
 
             if (entries.length === 0) {
@@ -706,13 +826,18 @@
                 const top = document.createElement('div');
                 top.style.cssText = 'display: flex; gap: 8px; align-items: center;';
 
+                const badges = {
+                    'new-tab':     { label: 'NEW TAB',     color: '#a6e3a1' },
+                    'same-tab':    { label: 'SAME TAB',    color: '#f9e2af' },
+                    'not-handled': { label: 'NOT HANDLED', color: '#f38ba8' },
+                    'probe':       { label: 'NEVER SEEN',  color: '#cba6f7' }
+                };
+                const badgeInfo = badges[entry.action] || badges['not-handled'];
                 const badge = document.createElement('span');
-                const isNewTab = entry.action === 'new-tab';
-                badge.textContent = isNewTab ? 'NEW TAB' : (entry.action === 'same-tab' ? 'SAME TAB' : 'NOT HANDLED');
+                badge.textContent = badgeInfo.label;
                 badge.style.cssText = `
                     font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
-                    background: ${isNewTab ? '#a6e3a1' : (entry.action === 'same-tab' ? '#f9e2af' : '#f38ba8')};
-                    color: #1e1e2e; flex-shrink: 0;
+                    background: ${badgeInfo.color}; color: #1e1e2e; flex-shrink: 0;
                 `;
 
                 const when = document.createElement('span');
@@ -755,15 +880,16 @@
 
         const logToggle = makeButton('', '#89b4fa');
         function paintToggle() {
-            const on = isDiagLogging();
-            logToggle.textContent = on ? 'Logging: ON' : 'Logging: OFF';
-            logToggle.style.background = on ? '#a6e3a1' : '#585b70';
-            logToggle.style.color = on ? '#1e1e2e' : '#cdd6f4';
+            const mode = getDiagMode();
+            logToggle.textContent = mode === 'deep' ? 'Logging: DEEP' : (mode === 'on' ? 'Logging: ON' : 'Logging: OFF');
+            logToggle.style.background = mode === 'deep' ? '#cba6f7' : (mode === 'on' ? '#a6e3a1' : '#585b70');
+            logToggle.style.color = mode === 'off' ? '#cdd6f4' : '#1e1e2e';
         }
         paintToggle();
-        logToggle.title = 'Record what this script decides for every link click';
+        logToggle.title = 'OFF → ON (link clicks the script handles) → DEEP (also the clicks it never sees)';
         logToggle.addEventListener('click', () => {
-            setDiagLogging(!isDiagLogging());
+            const next = { off: 'on', on: 'deep', deep: 'off' };
+            setDiagMode(next[getDiagMode()]);
             paintToggle();
             renderLog();
         });
@@ -1109,9 +1235,10 @@
         // every link click, so it needs to be visible rather than something
         // you leave running for weeks by accident.
         if (indicatorCircle) {
-            const logging = isDiagLogging();
-            indicatorCircle.setAttribute('stroke', logging ? '#fab387' : 'none');
-            indicatorCircle.setAttribute('stroke-width', logging ? '2' : '0');
+            const mode = getDiagMode();
+            const ring = mode === 'deep' ? '#cba6f7' : (mode === 'on' ? '#fab387' : null);
+            indicatorCircle.setAttribute('stroke', ring || 'none');
+            indicatorCircle.setAttribute('stroke-width', ring ? '2' : '0');
         }
     }
 
@@ -1251,6 +1378,11 @@ function openInNewTab(url) {
         return { action: 'new-tab', reason: 'Opened in a background tab' };
     }
 
+    // Registered on window, in capture: it runs ahead of every document-level
+    // listener, including this script's own, so it observes clicks that never
+    // make it as far as the handler below.
+    window.addEventListener('click', probeClick, true);
+
     document.addEventListener('click', e => {
         if (e.button !== 0) return;
 
@@ -1258,7 +1390,10 @@ function openInNewTab(url) {
         if (!link) return;
 
         const verdict = classifyClick(e, link);
-        if (isDiagLogging()) recordDiagEntry(link, verdict);
+        if (isDiagLogging()) {
+            recordDiagEntry(link, verdict);
+            loggedToken = probeToken; // tells the probe this click is accounted for
+        }
 
         if (verdict.action === 'not-handled') return;
 
