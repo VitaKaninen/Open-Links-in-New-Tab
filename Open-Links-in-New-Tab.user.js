@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.19.0
+// @version     1.20.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.19.0';
+    const SCRIPT_VERSION = '1.20.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -190,12 +190,17 @@
     let clickSeenToken = 0;
 
     const PANEL_IDS = ['gm-newtab-settings', 'gm-newtab-diagnostics'];
+    let diagnosticsRefresh = null;
 
     // Clicks on this script's own panels are not evidence about the page, and
     // logging them buries the entry you actually went looking for.
     function isOwnUI(e) {
-        const path = (typeof e.composedPath === 'function') ? e.composedPath() : [e.target];
-        return path.some(node => node && node.id && PANEL_IDS.indexOf(node.id) !== -1);
+        const target = e.target;
+        if (!target) return false;
+        // Clicks inside the panels' shadow roots retarget to the host element,
+        // so its id is enough here — no composedPath() walk on every click.
+        if (target.id && PANEL_IDS.indexOf(target.id) !== -1) return true;
+        return !!(target.closest && target.closest('#gm-newtab-settings, #gm-newtab-diagnostics'));
     }
 
     // Set on the real window (not the userscript sandbox) so the top frame can
@@ -286,59 +291,79 @@
         }, 600);
     }
 
-    // Turns early capture on for this hostname the first time a click that the
-    // script *wanted* to act on is confirmed to have died before reaching the
-    // handler. That first click is already lost; every one after it works.
-    function enableEarlyCaptureForSite() {
+    // Notices that a site needs Early Capture and says so, but does not switch
+    // it on by itself. Enabling automatically would misfire on another
+    // userscript's modal click mode: Forum Stumbler's teach-by-clicking also
+    // stops the event at window level, which is indistinguishable from a site
+    // shield here. Auto-enabling on that would make this script win the race
+    // against it from then on — the exact collision the shared CLAUDE.md
+    // documents. So: report, and let the user decide.
+    let earlyCaptureSuggested = false;
+
+    function maybeSuggestEarlyCapture(link) {
+        if (earlyCaptureSuggested) return;
         const hostname = location.hostname.toLowerCase();
         if (!hostname || matchedEarlyCaptureSite()) return;
-        const list = getEarlyCaptureSites();
-        list.push(hostname);
-        saveEarlyCaptureSites(sortList(list));
+
+        let wouldHaveActed = false;
+        try {
+            wouldHaveActed = classifyClick({ defaultPrevented: false, shiftKey: false, altKey: false,
+                                             ctrlKey: false, metaKey: false }, link).action !== 'not-handled';
+        } catch (_) {
+            return;
+        }
+        if (!wouldHaveActed) return;
+
+        earlyCaptureSuggested = true;
         appendDiagEntry({
             t: Date.now(),
             page: truncate(location.href, 300),
-            href: '(no link)',
+            href: truncate(link.href || '', 300),
             text: hostname,
             action: 'probe',
-            reason: 'Early capture switched ON automatically for this site — its clicks were dying before reaching the handler',
-            rule: 'from now on this script intercepts at window level here; remove it under Settings › Early Capture'
+            reason: 'This site shields its clicks, so links here will not open in a new tab until Early Capture is switched on for it',
+            rule: 'fix: Settings › Early Capture › + This Site'
         });
     }
 
     function probeClick(e) {
         clickSeenToken = mousedownToken; // before the mode check: mousedown probe needs this either way
-        if (isOwnUI(e)) return;
         const deep = getDiagMode() === 'deep';
-        const shadowAnchor = pathAnchorOf(e);
-        const plainAnchor = (e.target && e.target.closest) ? e.target.closest('a[href]') : null;
-        const targetDesc = describeNode(e.target);
         const button = e.button;
+
+        // Hot path. With logging off, the only thing left to learn from a click
+        // is that this site needs Early Capture — so bail out as soon as that
+        // is settled, before touching the DOM or the stored lists. Ordinary
+        // browsing pays almost nothing for the probe being installed.
+        if (!deep) {
+            if (button !== 0 || earlyCaptureSuggested) return;
+            if (matchedEarlyCaptureSite()) return;   // already handled here
+            if (isPageExcepted() || !isEnabled()) return; // nothing would act anyway
+        }
+        if (isOwnUI(e)) return;
+
+        const plainAnchor = (e.target && e.target.closest) ? e.target.closest('a[href]') : null;
+        if (!deep && !plainAnchor) return;
+
+        // Only the diagnostics display needs these, so they stay off the hot path.
+        const shadowAnchor = deep ? pathAnchorOf(e) : null;
+        const targetDesc = deep ? describeNode(e.target) : '';
         // Read at window/capture — the earliest point in the dispatch. If it is
         // already true here, something ran before this script even saw the
         // event, which is the fingerprint of a site's own router.
         const alreadyPrevented = e.defaultPrevented;
-
-        // Whether the script would have acted, decided now rather than in the
-        // timeout below: by then the event's own state has moved on.
-        let wouldHaveActed = false;
-        if (plainAnchor && button === 0) {
-            try {
-                wouldHaveActed = classifyClick(e, plainAnchor).action !== 'not-handled';
-            } catch (_) {
-                wouldHaveActed = false;
-            }
-        }
 
         // Runs after the whole dispatch, so it knows whether the real handler
         // logged this click. If it did, stay quiet — no duplicate entries.
         setTimeout(() => {
             if (loggedEvents.has(e)) return;
 
-            // Self-healing runs whether or not logging is on, so the fix does
-            // not depend on the user leaving DEEP mode enabled.
+            // Detection runs whether or not logging is on, so a shielded site
+            // gets reported without having to leave DEEP mode enabled. The
+            // classification it needs is deferred to here: this branch is rare,
+            // and doing it eagerly would cost every click on every page.
             const diedBeforeHandler = button === 0 && plainAnchor && !docSeenEvents.has(e);
-            if (diedBeforeHandler && wouldHaveActed) enableEarlyCaptureForSite();
+            if (diedBeforeHandler) maybeSuggestEarlyCapture(plainAnchor);
 
             if (!deep) return;
 
@@ -985,11 +1010,11 @@
             const hint = document.createElement('div');
             hint.style.cssText = 'font-size: 12px; color: #9399b2; line-height: 1.45;';
             if (mode === 'deep') {
-                hint.textContent = 'Logging is DEEP. Every left-click is recorded, including clicks this script never sees — use this when normal logging shows nothing. Click the link that misbehaves, then reopen this panel.';
+                hint.textContent = 'Logging is DEEP: every left-click is recorded, including clicks this script never sees. Click the link that misbehaves, then reopen this panel. Press the "Logging: DEEP" button below once more to switch it back off.';
             } else if (mode === 'on') {
-                hint.textContent = 'Logging is ON. Click the link that misbehaves, then reopen this panel — the entry survives navigating away. If a click records nothing at all, switch to DEEP.';
+                hint.textContent = 'Logging is ON: link clicks this script handles are recorded, and the entry survives navigating away. If a click records nothing at all, press the "Logging: ON" button below once to reach DEEP, which also records the clicks it never sees.';
             } else {
-                hint.textContent = 'Logging is OFF. Turn it on, click the link that misbehaves, then reopen this panel.';
+                hint.textContent = 'Logging is OFF. The button below cycles OFF → ON → DEEP → OFF: press it once for ON (clicks this script handles), twice for DEEP (also the clicks it never sees). Then click the link that misbehaves and reopen this panel.';
             }
             logBox.appendChild(hint);
 
@@ -1146,7 +1171,7 @@
         settingsBtn.addEventListener('click', () => { host.remove(); openSettingsPanel(); });
 
         const closeBtn = makeButton('Close', '#45475a', '#cdd6f4');
-        closeBtn.addEventListener('click', () => host.remove());
+        closeBtn.addEventListener('click', () => { diagnosticsRefresh = null; host.remove(); });
 
         controls.appendChild(logToggle);
         controls.appendChild(refreshBtn);
@@ -1158,6 +1183,13 @@
 
         renderStatus();
         renderLog();
+        // Lets the pageshow handler below repaint this panel after a
+        // back/forward restore, when the stored log it is showing may be stale.
+        diagnosticsRefresh = () => {
+            if (!document.getElementById('gm-newtab-diagnostics')) return;
+            renderStatus();
+            renderLog();
+        };
 
         body.appendChild(heading('This page'));
         body.appendChild(statusBox);
@@ -1570,6 +1602,19 @@ function openInNewTab(url) {
     // Registered on window, in capture: it runs ahead of every document-level
     // listener, including this script's own, so it observes clicks that never
     // make it as far as the handler below.
+    // Back/forward restores this page from the bfcache with its JavaScript heap
+    // intact, and the userscript manager's in-page copy of GM storage comes back
+    // with it — holding whatever the log looked like before we navigated away.
+    // So a log cleared on another page reappears here, and Refresh re-reads the
+    // same stale copy. Nothing can force a resync, but it does settle shortly;
+    // repaint a few times so the panel converges on the real stored log.
+    window.addEventListener('pageshow', e => {
+        if (!e.persisted || !diagnosticsRefresh) return;
+        [0, 300, 1000, 2500].forEach(delay => setTimeout(() => {
+            if (diagnosticsRefresh) diagnosticsRefresh();
+        }, delay));
+    });
+
     window.addEventListener('click', probeClick, true);
     window.addEventListener('mousedown', probeMousedown, true);
     markProbeAlive();
