@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.18.0
+// @version     1.19.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,12 +17,13 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.18.0';
+    const SCRIPT_VERSION = '1.19.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
     const PAGE_EXCEPTIONS_KEY = 'pageExceptions';
     const INSERT_NEXT_KEY = 'insertNextSites';
+    const EARLY_CAPTURE_KEY = 'earlyCaptureSites';
     const DIAG_LOGGING_KEY = 'diagnosticLogging'; // v1.15.0 boolean, still read for migration
     const DIAG_MODE_KEY = 'diagnosticMode';
     const DIAG_LOG_KEY = 'diagnosticLog';
@@ -79,6 +80,32 @@
 
     function saveInsertNextSites(list) {
         GM_setValue(INSERT_NEXT_KEY, JSON.stringify(list));
+    }
+
+    // ---------------- Early Capture (per-site) ----------------
+    // Some sites shield their own click handling with a stopPropagation() call
+    // on a window capture listener. The event then dies before it reaches this
+    // script's handler on document, and links open in the same tab with no
+    // sign of why. Acting from window/capture instead fixes it — but only for
+    // the sites that need it: running that early everywhere would put this
+    // script ahead of other userscripts' click modes (Forum Stumbler's
+    // teach-by-clicking registers its window listener later than our boot-time
+    // one, so we would start stealing its picks). Hence a per-site list.
+    function getEarlyCaptureSites() {
+        const stored = GM_getValue(EARLY_CAPTURE_KEY, null);
+        if (stored === null) return [];
+        try { return JSON.parse(stored); } catch (_) { return []; }
+    }
+
+    function saveEarlyCaptureSites(list) {
+        GM_setValue(EARLY_CAPTURE_KEY, JSON.stringify(list));
+    }
+
+    function matchedEarlyCaptureSite() {
+        const hostname = location.hostname.toLowerCase();
+        return getEarlyCaptureSites().find(domain =>
+            hostname === domain || hostname.endsWith('.' + domain)
+        ) || null;
     }
 
     // ---------------- Diagnostic Log (persisted) ----------------
@@ -259,10 +286,30 @@
         }, 600);
     }
 
+    // Turns early capture on for this hostname the first time a click that the
+    // script *wanted* to act on is confirmed to have died before reaching the
+    // handler. That first click is already lost; every one after it works.
+    function enableEarlyCaptureForSite() {
+        const hostname = location.hostname.toLowerCase();
+        if (!hostname || matchedEarlyCaptureSite()) return;
+        const list = getEarlyCaptureSites();
+        list.push(hostname);
+        saveEarlyCaptureSites(sortList(list));
+        appendDiagEntry({
+            t: Date.now(),
+            page: truncate(location.href, 300),
+            href: '(no link)',
+            text: hostname,
+            action: 'probe',
+            reason: 'Early capture switched ON automatically for this site — its clicks were dying before reaching the handler',
+            rule: 'from now on this script intercepts at window level here; remove it under Settings › Early Capture'
+        });
+    }
+
     function probeClick(e) {
         clickSeenToken = mousedownToken; // before the mode check: mousedown probe needs this either way
-        if (getDiagMode() !== 'deep') return;
         if (isOwnUI(e)) return;
+        const deep = getDiagMode() === 'deep';
         const shadowAnchor = pathAnchorOf(e);
         const plainAnchor = (e.target && e.target.closest) ? e.target.closest('a[href]') : null;
         const targetDesc = describeNode(e.target);
@@ -272,10 +319,28 @@
         // event, which is the fingerprint of a site's own router.
         const alreadyPrevented = e.defaultPrevented;
 
+        // Whether the script would have acted, decided now rather than in the
+        // timeout below: by then the event's own state has moved on.
+        let wouldHaveActed = false;
+        if (plainAnchor && button === 0) {
+            try {
+                wouldHaveActed = classifyClick(e, plainAnchor).action !== 'not-handled';
+            } catch (_) {
+                wouldHaveActed = false;
+            }
+        }
+
         // Runs after the whole dispatch, so it knows whether the real handler
         // logged this click. If it did, stay quiet — no duplicate entries.
         setTimeout(() => {
             if (loggedEvents.has(e)) return;
+
+            // Self-healing runs whether or not logging is on, so the fix does
+            // not depend on the user leaving DEEP mode enabled.
+            const diedBeforeHandler = button === 0 && plainAnchor && !docSeenEvents.has(e);
+            if (diedBeforeHandler && wouldHaveActed) enableEarlyCaptureForSite();
+
+            if (!deep) return;
 
             let reason, rule;
             if (button !== 0) {
@@ -749,17 +814,33 @@
         });
         tabPlacementSection.style.display = 'none';
 
+        const earlyCaptureSection = buildSection({
+            description: 'Sites where this script grabs clicks one step earlier (at window level). Needed when a site shields its own click handling with stopPropagation, which otherwise kills the click before this script sees it. Added automatically when that is detected — remove an entry if it causes trouble.',
+            examples: 'Examples: example.com, app.example.org',
+            placeholder: 'e.g. example.com',
+            addCurrentLabel: '+ This Site',
+            addCurrentTitle: 'Add the current site (' + location.hostname + ')',
+            exportFilename: 'open-links-new-tab_early-capture.txt',
+            getItems: getEarlyCaptureSites,
+            saveItems: saveEarlyCaptureSites,
+            normalize: raw => raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0],
+            currentValue: () => location.hostname.toLowerCase()
+        });
+        earlyCaptureSection.style.display = 'none';
+
         const tab0 = makeTab('Active Sites', 0);
         const tab1 = makeTab('Link Exceptions', 1);
         const tab2 = makeTab('Page Exceptions', 2);
         const tab3 = makeTab('Tab Placement', 3);
+        const tab4 = makeTab('Early Capture', 4);
         tabBar.appendChild(tab0);
         tabBar.appendChild(tab1);
         tabBar.appendChild(tab2);
         tabBar.appendChild(tab3);
+        tabBar.appendChild(tab4);
 
-        const allTabs = [tab0, tab1, tab2, tab3];
-        const allContents = [sitesSection, exceptionsSection, pageExceptionsSection, tabPlacementSection];
+        const allTabs = [tab0, tab1, tab2, tab3, tab4];
+        const allContents = [sitesSection, exceptionsSection, pageExceptionsSection, tabPlacementSection, earlyCaptureSection];
 
         allTabs.forEach((t, i) => t.addEventListener('click', () => setActiveTab(i, allTabs, allContents)));
         setActiveTab(0, allTabs, allContents);
@@ -768,6 +849,7 @@
         tabContents.appendChild(exceptionsSection);
         tabContents.appendChild(pageExceptionsSection);
         tabContents.appendChild(tabPlacementSection);
+        tabContents.appendChild(earlyCaptureSection);
 
         const closeBtn = document.createElement('button');
         closeBtn.textContent = 'Close';
@@ -848,6 +930,7 @@
             lines.push('Click logging: ' + getDiagMode().toUpperCase());
             lines.push('Frame: ' + (window === window.top ? 'top-level document' : 'inside an iframe'));
             lines.push('Frames on this page: ' + frameReport());
+            lines.push('Early capture: ' + (matchedEarlyCaptureSite() ? 'ON (rule "' + matchedEarlyCaptureSite() + '")' : 'off'));
             return { lines, pageRule, siteRule };
         }
 
@@ -884,6 +967,10 @@
             const frames = frameReport();
             statusBox.appendChild(statusRow('Frames on page', frames,
                 /NOT running|cannot inspect/.test(frames) ? '#f9e2af' : '#cdd6f4'));
+            const earlyRule = matchedEarlyCaptureSite();
+            statusBox.appendChild(statusRow('Early capture',
+                earlyRule ? 'ON — intercepting at window level (rule "' + earlyRule + '")' : 'off — intercepting at document level',
+                earlyRule ? '#a6e3a1' : '#cdd6f4'));
             statusBox.appendChild(statusRow('List sizes',
                 getActiveSites().length + ' active · ' + getExceptions().length + ' link exc · ' +
                 getPageExceptions().length + ' page exc · ' + getInsertNextSites().length + ' placement'));
@@ -1487,18 +1574,8 @@ function openInNewTab(url) {
     window.addEventListener('mousedown', probeMousedown, true);
     markProbeAlive();
 
-    // A bare witness on document/capture, registered before the real handler
-    // and doing nothing but recording that the event got this far. Without it,
-    // "the handler produced no entry" is ambiguous: stopped propagation and a
-    // handler that threw look identical. This tells them apart.
-    document.addEventListener('click', e => { docSeenEvents.add(e); }, true);
-
-    document.addEventListener('click', e => {
-        if (e.button !== 0) return;
-
-        const link = e.target.closest('a[href]');
-        if (!link) return;
-
+    // Shared by both entry points so the two can never drift apart.
+    function actOnClick(e, link) {
         let verdict;
         try {
             verdict = classifyClick(e, link);
@@ -1534,6 +1611,38 @@ function openInNewTab(url) {
         } else {
             openInNewTab(link.href);
         }
+    }
+
+    // Early capture: same decision, made one node earlier. Only for sites on
+    // the Early Capture list, because running this early everywhere would put
+    // this script ahead of other scripts' click modes. Registered after the
+    // probe above so the probe still records the click first.
+    window.addEventListener('click', e => {
+        if (e.button !== 0) return;
+        if (!matchedEarlyCaptureSite()) return;
+        if (isOwnUI(e)) return;
+
+        const link = e.target.closest('a[href]');
+        if (!link) return;
+
+        actOnClick(e, link);
+    }, true);
+
+    // A bare witness on document/capture, registered before the real handler
+    // and doing nothing but recording that the event got this far. Without it,
+    // "the handler produced no entry" is ambiguous: stopped propagation and a
+    // handler that threw look identical. This tells them apart.
+    document.addEventListener('click', e => { docSeenEvents.add(e); }, true);
+
+    // The normal path. On early-capture sites the window listener above has
+    // already handled and stopped the event, so this never sees it.
+    document.addEventListener('click', e => {
+        if (e.button !== 0) return;
+
+        const link = e.target.closest('a[href]');
+        if (!link) return;
+
+        actOnClick(e, link);
     }, true);
 
 })();
