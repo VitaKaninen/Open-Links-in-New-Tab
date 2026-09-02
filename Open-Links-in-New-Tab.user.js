@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.16.0
+// @version     1.17.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.16.0';
+    const SCRIPT_VERSION = '1.17.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -155,6 +155,56 @@
     // cannot change what the page does.
     let probeToken = 0;
     let loggedToken = -1;
+    let mousedownToken = 0;
+    let clickSeenToken = 0;
+
+    const PANEL_IDS = ['gm-newtab-settings', 'gm-newtab-diagnostics'];
+
+    // Clicks on this script's own panels are not evidence about the page, and
+    // logging them buries the entry you actually went looking for.
+    function isOwnUI(e) {
+        const path = (typeof e.composedPath === 'function') ? e.composedPath() : [e.target];
+        return path.some(node => node && node.id && PANEL_IDS.indexOf(node.id) !== -1);
+    }
+
+    // Set on the real window (not the userscript sandbox) so the top frame can
+    // ask each iframe whether the script is alive inside it.
+    function markProbeAlive() {
+        try {
+            const realWin = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+            realWin.__olintProbeAlive = true;
+        } catch (_) {
+            // Sandbox refused the write; frameReport() degrades to "cannot inspect".
+        }
+    }
+
+    // An <a> inside an iframe is completely invisible to the top-frame probe,
+    // and that is indistinguishable from "no click happened" — so enumerate the
+    // frames and say which ones the script is actually watching.
+    function frameReport() {
+        const frames = document.querySelectorAll('iframe');
+        if (!frames.length) return 'none — every link on this page is in this document';
+
+        let alive = 0, blind = 0, opaque = 0;
+        frames.forEach(frame => {
+            let win = null;
+            try {
+                win = frame.contentWindow;
+                void win.location.href; // throws for cross-origin
+            } catch (_) {
+                opaque++;
+                return;
+            }
+            if (!win) { opaque++; return; }
+            if (win.__olintProbeAlive === true) alive++; else blind++;
+        });
+
+        const parts = [];
+        if (alive) parts.push(alive + ' with the script running');
+        if (blind) parts.push(blind + ' where the script is NOT running');
+        if (opaque) parts.push(opaque + ' cross-origin (cannot inspect)');
+        return frames.length + ' iframe' + (frames.length === 1 ? '' : 's') + ' — ' + parts.join(', ');
+    }
 
     function describeNode(node) {
         if (!node || !node.tagName) return String((node && node.nodeName) || 'unknown');
@@ -177,8 +227,38 @@
         return null;
     }
 
-    function probeClick(e) {
+    // A rival listener registered on window before this one can kill a click
+    // with stopImmediatePropagation, and then even the probe above never runs —
+    // silence again. mousedown fires first and is far less often intercepted,
+    // so "mousedown seen, click never seen" isolates that case, and "neither
+    // seen" means the click is not happening in this document at all.
+    function probeMousedown(e) {
         if (getDiagMode() !== 'deep') return;
+        if (e.button !== 0 || isOwnUI(e)) return;
+
+        const seq = ++mousedownToken;
+        const anchor = pathAnchorOf(e) || ((e.target && e.target.closest) ? e.target.closest('a[href]') : null);
+        const targetDesc = describeNode(e.target);
+
+        setTimeout(() => {
+            if (clickSeenToken >= seq) return; // a click followed; the click probe has it
+
+            appendDiagEntry({
+                t: Date.now(),
+                page: truncate(location.href, 300),
+                href: anchor ? truncate(anchor.href, 300) : '(no link)',
+                text: truncate(((anchor || e.target).textContent || '').replace(/\s+/g, ' ').trim(), 80),
+                action: 'probe',
+                reason: 'A mousedown was seen here but no click event ever followed — something is suppressing the click itself, or the site navigates on mousedown',
+                rule: 'pressed on: ' + targetDesc
+            });
+        }, 600);
+    }
+
+    function probeClick(e) {
+        clickSeenToken = mousedownToken; // before the mode check: mousedown probe needs this either way
+        if (getDiagMode() !== 'deep') return;
+        if (isOwnUI(e)) return;
         const token = ++probeToken;
         const shadowAnchor = pathAnchorOf(e);
         const plainAnchor = (e.target && e.target.closest) ? e.target.closest('a[href]') : null;
@@ -219,6 +299,7 @@
     }
 
     function installFrameProbe() {
+        markProbeAlive();
         window.addEventListener('click', e => {
             if (getDiagMode() !== 'deep') return;
             const anchor = pathAnchorOf(e) || ((e.target && e.target.closest) ? e.target.closest('a[href]') : null);
@@ -749,6 +830,7 @@
                        getInsertNextSites().length + ' tab-placement sites');
             lines.push('Click logging: ' + getDiagMode().toUpperCase());
             lines.push('Frame: ' + (window === window.top ? 'top-level document' : 'inside an iframe'));
+            lines.push('Frames on this page: ' + frameReport());
             return { lines, pageRule, siteRule };
         }
 
@@ -782,6 +864,9 @@
                 pageRule ? '#f38ba8' : '#cdd6f4'));
             statusBox.appendChild(statusRow('Tab placement',
                 shouldInsertNext(location.href) ? 'next to this tab' : 'end of the tab bar'));
+            const frames = frameReport();
+            statusBox.appendChild(statusRow('Frames on page', frames,
+                /NOT running|cannot inspect/.test(frames) ? '#f9e2af' : '#cdd6f4'));
             statusBox.appendChild(statusRow('List sizes',
                 getActiveSites().length + ' active · ' + getExceptions().length + ' link exc · ' +
                 getPageExceptions().length + ' page exc · ' + getInsertNextSites().length + ' placement'));
@@ -807,7 +892,7 @@
             const caveat = document.createElement('div');
             caveat.style.cssText = 'font-size: 12px; color: #6c7086; font-style: italic; line-height: 1.45;';
             caveat.textContent = mode === 'deep'
-                ? 'Still nothing after clicking in DEEP mode? Then the script is not running on this page at all — check that the N indicator appears, and that Tampermonkey is enabled and not blocked here.'
+                ? 'Still nothing after clicking a link in DEEP mode? Then the click is not happening in this document. Check "Frames on page" above — a link inside an iframe is invisible here. If there are no frames, the script is not running on this page at all: confirm the N indicator appears.'
                 : 'No entry at all for a click means it never reached this script. DEEP mode identifies which of the causes it is.';
             logBox.appendChild(caveat);
 
@@ -1382,6 +1467,8 @@ function openInNewTab(url) {
     // listener, including this script's own, so it observes clicks that never
     // make it as far as the handler below.
     window.addEventListener('click', probeClick, true);
+    window.addEventListener('mousedown', probeMousedown, true);
+    markProbeAlive();
 
     document.addEventListener('click', e => {
         if (e.button !== 0) return;
