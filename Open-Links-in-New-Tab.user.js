@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.17.0
+// @version     1.18.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.17.0';
+    const SCRIPT_VERSION = '1.18.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -153,8 +153,12 @@
     // something else stops before they reach the handler — and names which
     // cause applies. It never calls preventDefault or stopPropagation, so it
     // cannot change what the page does.
-    let probeToken = 0;
-    let loggedToken = -1;
+    // Keyed by the event object itself, not by a counter: several clicks can
+    // land before the deferred checks below drain, and a shared counter would
+    // let a later click overwrite an earlier one's state — making the probe
+    // report a verdict about the wrong click.
+    const loggedEvents = new WeakSet();
+    const docSeenEvents = new WeakSet();
     let mousedownToken = 0;
     let clickSeenToken = 0;
 
@@ -259,16 +263,19 @@
         clickSeenToken = mousedownToken; // before the mode check: mousedown probe needs this either way
         if (getDiagMode() !== 'deep') return;
         if (isOwnUI(e)) return;
-        const token = ++probeToken;
         const shadowAnchor = pathAnchorOf(e);
         const plainAnchor = (e.target && e.target.closest) ? e.target.closest('a[href]') : null;
         const targetDesc = describeNode(e.target);
         const button = e.button;
+        // Read at window/capture — the earliest point in the dispatch. If it is
+        // already true here, something ran before this script even saw the
+        // event, which is the fingerprint of a site's own router.
+        const alreadyPrevented = e.defaultPrevented;
 
         // Runs after the whole dispatch, so it knows whether the real handler
         // logged this click. If it did, stay quiet — no duplicate entries.
         setTimeout(() => {
-            if (loggedToken === token) return;
+            if (loggedEvents.has(e)) return;
 
             let reason, rule;
             if (button !== 0) {
@@ -280,9 +287,19 @@
             } else if (shadowAnchor && !plainAnchor) {
                 reason = 'The link sits inside a shadow root, where this script cannot reach it';
                 rule = 'clicked: ' + targetDesc;
+            } else if (!docSeenEvents.has(e)) {
+                // The bare document-capture probe never fired either, so the
+                // event really was killed on the way. Only a window-level
+                // capture listener sits between the two.
+                reason = 'The click reached window but never reached document — a listener on window called stopPropagation()';
+                rule = 'the site\'s own router, or an extension' +
+                       (alreadyPrevented ? '; it had already called preventDefault() before this script saw the click' : '');
             } else {
-                reason = 'The click never reached this script — something stopped propagation between window and document';
-                rule = 'another userscript or extension, listening at window level';
+                // document saw the event, so nothing stopped propagation: the
+                // handler itself is the thing that did not act.
+                reason = 'The click DID reach this script, but the handler produced no verdict — it bailed out or threw';
+                rule = 'handler reached, verdict missing' +
+                       (alreadyPrevented ? '; defaultPrevented was already true at window capture' : '');
             }
 
             const anchor = shadowAnchor || plainAnchor;
@@ -1470,16 +1487,42 @@ function openInNewTab(url) {
     window.addEventListener('mousedown', probeMousedown, true);
     markProbeAlive();
 
+    // A bare witness on document/capture, registered before the real handler
+    // and doing nothing but recording that the event got this far. Without it,
+    // "the handler produced no entry" is ambiguous: stopped propagation and a
+    // handler that threw look identical. This tells them apart.
+    document.addEventListener('click', e => { docSeenEvents.add(e); }, true);
+
     document.addEventListener('click', e => {
         if (e.button !== 0) return;
 
         const link = e.target.closest('a[href]');
         if (!link) return;
 
-        const verdict = classifyClick(e, link);
+        let verdict;
+        try {
+            verdict = classifyClick(e, link);
+        } catch (err) {
+            // A throw here would otherwise be indistinguishable from silence,
+            // and on a page full of extension noise the console is no help.
+            if (isDiagLogging()) {
+                appendDiagEntry({
+                    t: Date.now(),
+                    page: truncate(location.href, 300),
+                    href: truncate(link.href || '', 300),
+                    text: truncate((link.textContent || '').replace(/\s+/g, ' ').trim(), 80),
+                    action: 'probe',
+                    reason: 'The handler threw while classifying this link, so the click fell through to the page',
+                    rule: String((err && err.message) || err)
+                });
+                loggedEvents.add(e);
+            }
+            return;
+        }
+
         if (isDiagLogging()) {
             recordDiagEntry(link, verdict);
-            loggedToken = probeToken; // tells the probe this click is accounted for
+            loggedEvents.add(e); // tells the probe this click is accounted for
         }
 
         if (verdict.action === 'not-handled') return;
