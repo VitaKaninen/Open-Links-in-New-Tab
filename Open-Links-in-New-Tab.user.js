@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.14.0
+// @version     1.15.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -18,11 +18,15 @@
 (function() {
     'use strict';
     if (window !== window.top) return;
+    const SCRIPT_VERSION = '1.15.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
     const PAGE_EXCEPTIONS_KEY = 'pageExceptions';
     const INSERT_NEXT_KEY = 'insertNextSites';
+    const DIAG_LOGGING_KEY = 'diagnosticLogging';
+    const DIAG_LOG_KEY = 'diagnosticLog';
+    const DIAG_LOG_MAX = 40;
 
     // ---------------- Site List (persisted) ----------------
     function getActiveSites() {
@@ -65,6 +69,59 @@
         GM_setValue(INSERT_NEXT_KEY, JSON.stringify(list));
     }
 
+    // ---------------- Diagnostic Log (persisted) ----------------
+    // The log lives in GM storage rather than the page console on purpose:
+    //   - it holds only this script's own decisions, so extension noise
+    //     (NoScript/uBlock CSP and blocked-request errors) can't bury it;
+    //   - GM storage is shared across pages and origins, so a click that
+    //     navigates away still leaves a readable entry behind;
+    //   - the panel can show the Active Sites / Exceptions lists too, which
+    //     page-console code can never reach — GM storage is outside the page.
+    function isDiagLogging() {
+        return GM_getValue(DIAG_LOGGING_KEY, false) === true;
+    }
+
+    function setDiagLogging(on) {
+        GM_setValue(DIAG_LOGGING_KEY, on === true);
+        safeUpdateIndicator();
+    }
+
+    function getDiagLog() {
+        const stored = GM_getValue(DIAG_LOG_KEY, null);
+        if (stored === null) return [];
+        try {
+            const parsed = JSON.parse(stored);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_) { return []; }
+    }
+
+    function clearDiagLog() {
+        GM_setValue(DIAG_LOG_KEY, JSON.stringify([]));
+    }
+
+    function truncate(value, max) {
+        const s = String(value == null ? '' : value);
+        return s.length > max ? s.slice(0, max - 1) + '…' : s;
+    }
+
+    function recordDiagEntry(link, verdict) {
+        try {
+            const log = getDiagLog();
+            log.unshift({
+                t: Date.now(),
+                page: truncate(location.href, 300),
+                href: truncate(link.href, 300),
+                text: truncate((link.textContent || '').replace(/\s+/g, ' ').trim(), 80),
+                action: verdict.action,
+                reason: verdict.reason,
+                rule: verdict.rule || ''
+            });
+            GM_setValue(DIAG_LOG_KEY, JSON.stringify(log.slice(0, DIAG_LOG_MAX)));
+        } catch (_) {
+            // Diagnostics must never break a click.
+        }
+    }
+
     // ---------------- List Ordering ----------------
     // Every settings list is shown and stored alphabetically, so scanning for
     // "is this site already in here?" is a straight read down the column.
@@ -83,16 +140,14 @@
         );
     }
 
-    // ---------------- Settings Panel ----------------
-    function openSettingsPanel() {
-        if (document.getElementById('gm-newtab-settings')) return;
-
-        // Host element + Shadow DOM so the host page's CSS can't cascade into
-        // the panel. Page selectors (div/button/input/* rules, inherited props)
-        // don't cross the shadow boundary, so the UI renders consistently
-        // regardless of which site it's opened on.
+    // ---------------- Panel Shell ----------------
+    // Host element + Shadow DOM so the host page's CSS can't cascade into the
+    // panel. Page selectors (div/button/input/* rules, inherited props) don't
+    // cross the shadow boundary, so the UI renders consistently regardless of
+    // which site it's opened on. Shared by the settings and diagnostics panels.
+    function createPanelShell(id, titleText, width) {
         const host = document.createElement('div');
-        host.id = 'gm-newtab-settings';
+        host.id = id;
         host.style.cssText = 'all: initial;';
         const root = host.attachShadow({ mode: 'open' });
 
@@ -112,14 +167,41 @@
         const panel = document.createElement('div');
         panel.style.cssText = `
             background: #1e1e2e; color: #cdd6f4; border-radius: 10px;
-            padding: 20px 24px; width: 420px; max-height: 80vh;
+            padding: 20px 24px; width: ${width}px; max-height: 80vh;
             display: flex; flex-direction: column; gap: 12px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.5); overflow: hidden;
         `;
 
         const title = document.createElement('div');
         title.style.cssText = 'font-size: 15px; font-weight: 700; color: #89b4fa;';
-        title.textContent = 'Open Links in New Tab — Settings';
+        title.textContent = titleText;
+
+        panel.appendChild(title);
+        overlay.appendChild(panel);
+        root.appendChild(overlay);
+        overlay.addEventListener('click', e => { if (e.target === overlay) host.remove(); });
+
+        return { host, panel };
+    }
+
+    function makeButton(label, background, color) {
+        const btn = document.createElement('button');
+        btn.textContent = label;
+        btn.style.cssText = `
+            padding: 6px 14px; border-radius: 6px; border: none;
+            background: ${background}; color: ${color || '#1e1e2e'};
+            font-weight: 700; font-size: 13px; cursor: pointer; white-space: nowrap;
+        `;
+        return btn;
+    }
+
+    // ---------------- Settings Panel ----------------
+    function openSettingsPanel() {
+        if (document.getElementById('gm-newtab-settings')) return;
+
+        const shell = createPanelShell('gm-newtab-settings', 'Open Links in New Tab — Settings', 420);
+        const host = shell.host;
+        const panel = shell.panel;
 
         // Tabs
         const tabBar = document.createElement('div');
@@ -485,18 +567,296 @@
             font-size: 13px; cursor: pointer; margin-top: 4px;
         `;
         closeBtn.addEventListener('click', () => host.remove());
-        overlay.addEventListener('click', e => { if (e.target === overlay) host.remove(); });
 
-        panel.appendChild(title);
         panel.appendChild(tabBar);
         panel.appendChild(tabContents);
         panel.appendChild(closeBtn);
-        overlay.appendChild(panel);
-        root.appendChild(overlay);
+        document.documentElement.appendChild(host);
+    }
+
+    // ---------------- Diagnostics Panel ----------------
+    // Answers "why did this link not open in a new tab?" without going near the
+    // page console. Two halves: the live state of the script on this page, and
+    // a replay of the decisions it actually made on recent link clicks.
+    function openDiagnosticsPanel() {
+        if (document.getElementById('gm-newtab-diagnostics')) return;
+
+        const shell = createPanelShell('gm-newtab-diagnostics', 'Open Links in New Tab — Diagnostics', 560);
+        const host = shell.host;
+        const panel = shell.panel;
+
+        const body = document.createElement('div');
+        body.style.cssText = 'flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px;';
+
+        function heading(text) {
+            const h = document.createElement('div');
+            h.style.cssText = 'font-size: 13px; font-weight: 700; color: #cdd6f4; border-bottom: 1px solid #45475a; padding-bottom: 4px;';
+            h.textContent = text;
+            return h;
+        }
+
+        function statusRow(label, value, color) {
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; gap: 10px; font-size: 12px; line-height: 1.5;';
+            const l = document.createElement('span');
+            l.style.cssText = 'color: #9399b2; flex: 0 0 130px;';
+            l.textContent = label;
+            const v = document.createElement('span');
+            v.style.cssText = `color: ${color || '#cdd6f4'}; word-break: break-all; flex: 1;`;
+            v.textContent = value;
+            row.appendChild(l);
+            row.appendChild(v);
+            return row;
+        }
+
+        // ---------- Status ----------
+        const statusBox = document.createElement('div');
+        statusBox.style.cssText = 'display: flex; flex-direction: column; gap: 3px;';
+
+        const logBox = document.createElement('div');
+        logBox.style.cssText = 'display: flex; flex-direction: column; gap: 6px;';
+
+        function reportLines() {
+            const pageRule = matchedPageException();
+            const siteRule = matchedActiveSite();
+            const lines = [];
+            lines.push('Open Links in New Tab v' + SCRIPT_VERSION + ' — diagnostics');
+            lines.push('Page: ' + location.href);
+            if (pageRule) {
+                lines.push('State: DORMANT — Page Exceptions rule "' + pageRule + '" matches this URL');
+            } else if (isEnabled()) {
+                lines.push('State: ACTIVE — links open in a new tab');
+            } else {
+                lines.push('State: OFF in this tab — press Alt+N, or add this site under Active Sites');
+            }
+            lines.push('Active Sites match: ' + (siteRule || 'none — ' + location.hostname + ' is not listed'));
+            lines.push('Page Exceptions match: ' + (pageRule || 'none'));
+            lines.push('Tab placement: ' + (shouldInsertNext(location.href) ? 'next to this tab' : 'end of the tab bar'));
+            lines.push('List sizes: ' + getActiveSites().length + ' active sites, ' + getExceptions().length +
+                       ' link exceptions, ' + getPageExceptions().length + ' page exceptions, ' +
+                       getInsertNextSites().length + ' tab-placement sites');
+            lines.push('Click logging: ' + (isDiagLogging() ? 'ON' : 'OFF'));
+            return { lines, pageRule, siteRule };
+        }
+
+        function renderStatus() {
+            while (statusBox.firstChild) statusBox.removeChild(statusBox.firstChild);
+            const info = reportLines();
+            const pageRule = info.pageRule;
+            const siteRule = info.siteRule;
+
+            let stateText, stateColor;
+            if (pageRule) {
+                stateText = 'DORMANT — a Page Exceptions rule matches this URL';
+                stateColor = '#f38ba8';
+            } else if (isEnabled()) {
+                stateText = 'ACTIVE — links should open in a new tab';
+                stateColor = '#a6e3a1';
+            } else {
+                stateText = 'OFF in this tab — press Alt+N, or add this site under Active Sites';
+                stateColor = '#f38ba8';
+            }
+
+            statusBox.appendChild(statusRow('Script state', stateText, stateColor));
+            statusBox.appendChild(statusRow('Version', SCRIPT_VERSION));
+            statusBox.appendChild(statusRow('This page', location.href));
+            statusBox.appendChild(statusRow('Hostname', location.hostname));
+            statusBox.appendChild(statusRow('Active Sites rule',
+                siteRule || 'none matched — this hostname is not in the list',
+                siteRule ? '#a6e3a1' : '#f9e2af'));
+            statusBox.appendChild(statusRow('Page Exceptions rule',
+                pageRule || 'none matched',
+                pageRule ? '#f38ba8' : '#cdd6f4'));
+            statusBox.appendChild(statusRow('Tab placement',
+                shouldInsertNext(location.href) ? 'next to this tab' : 'end of the tab bar'));
+            statusBox.appendChild(statusRow('List sizes',
+                getActiveSites().length + ' active · ' + getExceptions().length + ' link exc · ' +
+                getPageExceptions().length + ' page exc · ' + getInsertNextSites().length + ' placement'));
+        }
+
+        // ---------- Click log ----------
+        function renderLog() {
+            while (logBox.firstChild) logBox.removeChild(logBox.firstChild);
+            const entries = getDiagLog();
+
+            const hint = document.createElement('div');
+            hint.style.cssText = 'font-size: 12px; color: #9399b2; line-height: 1.45;';
+            hint.textContent = isDiagLogging()
+                ? 'Logging is ON. Click the link that misbehaves, then reopen this panel — the entry survives navigating away.'
+                : 'Logging is OFF. Turn it on, click the link that misbehaves, then reopen this panel.';
+            logBox.appendChild(hint);
+
+            const caveat = document.createElement('div');
+            caveat.style.cssText = 'font-size: 12px; color: #6c7086; font-style: italic; line-height: 1.45;';
+            caveat.textContent = 'No entry at all for a click means it never reached this script: either the element is not an <a href>, or something running earlier (another userscript or extension, at window level) swallowed the event.';
+            logBox.appendChild(caveat);
+
+            if (entries.length === 0) {
+                const empty = document.createElement('div');
+                empty.style.cssText = 'color: #6c7086; font-size: 13px; text-align: center; padding: 12px 0;';
+                empty.textContent = 'No clicks logged yet.';
+                logBox.appendChild(empty);
+                return;
+            }
+
+            entries.forEach(entry => {
+                const row = document.createElement('div');
+                row.style.cssText = 'background: #313244; border-radius: 6px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px;';
+
+                const top = document.createElement('div');
+                top.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+
+                const badge = document.createElement('span');
+                const isNewTab = entry.action === 'new-tab';
+                badge.textContent = isNewTab ? 'NEW TAB' : (entry.action === 'same-tab' ? 'SAME TAB' : 'NOT HANDLED');
+                badge.style.cssText = `
+                    font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+                    background: ${isNewTab ? '#a6e3a1' : (entry.action === 'same-tab' ? '#f9e2af' : '#f38ba8')};
+                    color: #1e1e2e; flex-shrink: 0;
+                `;
+
+                const when = document.createElement('span');
+                when.style.cssText = 'font-size: 11px; color: #6c7086; flex-shrink: 0;';
+                when.textContent = new Date(entry.t).toLocaleTimeString();
+
+                const text = document.createElement('span');
+                text.style.cssText = 'font-size: 12px; color: #cdd6f4; font-weight: 600; word-break: break-all;';
+                text.textContent = entry.text ? '“' + entry.text + '”' : '(no link text)';
+
+                top.appendChild(badge);
+                top.appendChild(when);
+                top.appendChild(text);
+                row.appendChild(top);
+
+                const reason = document.createElement('div');
+                reason.style.cssText = 'font-size: 12px; color: #f9e2af; line-height: 1.4;';
+                reason.textContent = entry.reason + (entry.rule ? ' — ' + entry.rule : '');
+                row.appendChild(reason);
+
+                const href = document.createElement('div');
+                href.style.cssText = 'font-size: 11px; color: #9399b2; word-break: break-all;';
+                href.textContent = entry.href;
+                row.appendChild(href);
+
+                if (entry.page && entry.page !== entry.href) {
+                    const from = document.createElement('div');
+                    from.style.cssText = 'font-size: 11px; color: #6c7086; word-break: break-all;';
+                    from.textContent = 'clicked on: ' + entry.page;
+                    row.appendChild(from);
+                }
+
+                logBox.appendChild(row);
+            });
+        }
+
+        // ---------- Controls ----------
+        const controls = document.createElement('div');
+        controls.style.cssText = 'display: flex; gap: 6px; align-items: center; flex-wrap: wrap; border-top: 1px solid #45475a; padding-top: 10px;';
+
+        const logToggle = makeButton('', '#89b4fa');
+        function paintToggle() {
+            const on = isDiagLogging();
+            logToggle.textContent = on ? 'Logging: ON' : 'Logging: OFF';
+            logToggle.style.background = on ? '#a6e3a1' : '#585b70';
+            logToggle.style.color = on ? '#1e1e2e' : '#cdd6f4';
+        }
+        paintToggle();
+        logToggle.title = 'Record what this script decides for every link click';
+        logToggle.addEventListener('click', () => {
+            setDiagLogging(!isDiagLogging());
+            paintToggle();
+            renderLog();
+        });
+
+        const refreshBtn = makeButton('Refresh', '#89b4fa');
+        refreshBtn.addEventListener('click', () => { renderStatus(); renderLog(); });
+
+        const clearBtn = makeButton('Clear log', '#f38ba8');
+        clearBtn.addEventListener('click', () => { clearDiagLog(); renderLog(); });
+
+        const copyBtn = makeButton('Copy report', '#fab387');
+        const copyStatus = document.createElement('span');
+        copyStatus.style.cssText = 'font-size: 12px; color: #a6e3a1;';
+
+        // The report is plain text so it can be pasted straight into a bug
+        // report. clipboard.writeText is blocked on some pages (permissions
+        // policy, insecure origin), so fall back to a selectable textarea
+        // rather than failing silently.
+        const fallbackArea = document.createElement('textarea');
+        fallbackArea.style.cssText = `
+            display: none; width: 100%; height: 140px; margin-top: 8px;
+            background: #11111b; color: #cdd6f4; border: 1px solid #45475a;
+            border-radius: 6px; padding: 8px; font-size: 11px;
+            font-family: ui-monospace, monospace; resize: vertical;
+        `;
+        fallbackArea.readOnly = true;
+
+        function buildReport() {
+            const out = reportLines().lines.slice();
+            out.push('');
+            out.push('Recent link clicks (newest first):');
+            const entries = getDiagLog();
+            if (entries.length === 0) {
+                out.push('  (none logged)');
+            } else {
+                entries.forEach(entry => {
+                    out.push('  [' + new Date(entry.t).toLocaleTimeString() + '] ' + entry.action.toUpperCase() +
+                             ' — ' + entry.reason + (entry.rule ? ' — ' + entry.rule : ''));
+                    out.push('      text: ' + (entry.text || '(none)'));
+                    out.push('      href: ' + entry.href);
+                    out.push('      page: ' + entry.page);
+                });
+            }
+            return out.join('\n');
+        }
+
+        copyBtn.addEventListener('click', async () => {
+            const report = buildReport();
+            try {
+                await navigator.clipboard.writeText(report);
+                copyStatus.style.color = '#a6e3a1';
+                copyStatus.textContent = 'Copied.';
+                setTimeout(() => { copyStatus.textContent = ''; }, 3000);
+            } catch (_) {
+                fallbackArea.value = report;
+                fallbackArea.style.display = 'block';
+                fallbackArea.focus();
+                fallbackArea.select();
+                copyStatus.style.color = '#f9e2af';
+                copyStatus.textContent = 'Clipboard blocked — select and copy below.';
+            }
+        });
+
+        const settingsBtn = makeButton('Settings…', '#585b70', '#cdd6f4');
+        settingsBtn.addEventListener('click', () => { host.remove(); openSettingsPanel(); });
+
+        const closeBtn = makeButton('Close', '#45475a', '#cdd6f4');
+        closeBtn.addEventListener('click', () => host.remove());
+
+        controls.appendChild(logToggle);
+        controls.appendChild(refreshBtn);
+        controls.appendChild(clearBtn);
+        controls.appendChild(copyBtn);
+        controls.appendChild(settingsBtn);
+        controls.appendChild(closeBtn);
+        controls.appendChild(copyStatus);
+
+        renderStatus();
+        renderLog();
+
+        body.appendChild(heading('This page'));
+        body.appendChild(statusBox);
+        body.appendChild(heading('Recent link clicks'));
+        body.appendChild(logBox);
+
+        panel.appendChild(body);
+        panel.appendChild(controls);
+        panel.appendChild(fallbackArea);
         document.documentElement.appendChild(host);
     }
 
     GM_registerMenuCommand('Settings', openSettingsPanel);
+    GM_registerMenuCommand('Diagnose this page', openDiagnosticsPanel);
 	// GM_registerMenuCommand('Toggle for this tab', () => { toggleEnabled(); });
 
   // ---------------- Insert Next-To-Parent ----------------
@@ -512,6 +872,7 @@
     ];
 
     let indicator = null;
+    let indicatorCircle = null;
     let debounceTimer = null;
 
     function isEnabled() {
@@ -527,11 +888,19 @@
         setEnabled(!isEnabled());
     }
 
-    function checkDefaultEnabled() {
+    // Returns the Active Sites entry that covers this page, or null. The
+    // diagnostics panel shows the matching rule rather than a bare yes/no,
+    // because the usual failure is a near-miss: "www.example.com" listed
+    // while you're on "example.com".
+    function matchedActiveSite() {
         const hostname = location.hostname.toLowerCase();
-        const isDefaultSite = getActiveSites().some(domain =>
+        return getActiveSites().find(domain =>
             hostname === domain || hostname.endsWith('.' + domain)
-        );
+        ) || null;
+    }
+
+    function checkDefaultEnabled() {
+        const isDefaultSite = matchedActiveSite() !== null;
         if (isDefaultSite) {
             setEnabled(true); // Force ON for active sites — every time
         }
@@ -546,14 +915,20 @@
             link.pathname === location.pathname;
     }
 
-    function looksLikeDownload(link) {
-        if (link.hasAttribute('download')) return true;
-        return DOWNLOAD_EXTENSIONS.some(ext =>
-            link.pathname.toLowerCase().endsWith(ext)
-        );
+    // Each of these returns the rule that matched (a string, for diagnostics)
+    // or null. The click handler only cares whether the result is truthy, so
+    // behaviour is unchanged; the panel gets to name the culprit.
+    function downloadReason(link) {
+        if (link.hasAttribute('download')) return 'the <a> carries a download attribute';
+        const ext = DOWNLOAD_EXTENSIONS.find(x => link.pathname.toLowerCase().endsWith(x));
+        return ext ? 'path ends in ' + ext : null;
     }
 
-    function isNextPageLink(link) {
+    function looksLikeDownload(link) {
+        return downloadReason(link) !== null;
+    }
+
+    function nextPageReason(link) {
         if (link.textContent) {
             // Collapse whitespace: nested markup (a <span> inside the <a>)
             // puts newlines and indentation in textContent, so a bare trim()
@@ -578,8 +953,8 @@
                 'show more related videos',
                 'refresh'
             ]);
-            if (validTexts.has(text)) return true;
-            if (text.includes('more repl') || text.includes('more comment')) return true;
+            if (validTexts.has(text)) return 'link text "' + text + '" is in the pagination/sort-control word list';
+            if (text.includes('more repl') || text.includes('more comment')) return 'link text contains "more replies"/"more comments"';
         }
 
         if (link.href) {
@@ -589,17 +964,17 @@
             // follows the page number (…/page/3/?s=searchterm, …/new/2#top).
             const path = (link.pathname || '').toLowerCase();
 
-            if (/[?&](page|paged|p|pg|start|offset)=\d+(?:[&#]|$)/.test(url)) return true;
-            if (/[?&][^=]*-page=\d+(?:[&#]|$)/.test(url)) return true;
-            if (/\/(page|p)\/\d+\/?$/.test(path)) return true;
+            if (/[?&](page|paged|p|pg|start|offset)=\d+(?:[&#]|$)/.test(url)) return 'query string carries a page number (?page=N / ?p=N / ?offset=N …)';
+            if (/[?&][^=]*-page=\d+(?:[&#]|$)/.test(url)) return 'query string carries a prefixed page number (?something-page=N)';
+            if (/\/(page|p)\/\d+\/?$/.test(path)) return 'path ends in /page/N';
             // page2 / page-2 / page_2 / page2.html — the separator between the
             // word and the number is optional, and sites use all three forms.
-            if (/\bpage[-_]?\d+(\.\w+)?\/?$/.test(path)) return true;
-            if (/\/portal\/\d+\/?$/.test(path)) return true;
+            if (/\bpage[-_]?\d+(\.\w+)?\/?$/.test(path)) return 'path ends in pageN / page-N / page_N';
+            if (/\/portal\/\d+\/?$/.test(path)) return 'path ends in /portal/N';
             // Sort/feed segment followed by a number is always pagination —
             // …/new/2, …/top/3, …/hot/2. These words are sort orders, never
             // content slugs, so the trailing number can't be a content id.
-            if (/\/(new|newest|latest|recent|top|hot|best|rising|popular|trending|all|active|unanswered)\/\d+\/?$/.test(path)) return true;
+            if (/\/(new|newest|latest|recent|top|hot|best|rising|popular|trending|all|active|unanswered)\/\d+\/?$/.test(path)) return 'path ends in a sort word followed by a number (…/new/2, …/top/3)';
             // A URL ending in a bare number is ambiguous — it can be a page
             // (…/blog/2) or a content id (…/mods/232). Disambiguate with the
             // link's own text instead of any site-specific list: a real
@@ -614,30 +989,37 @@
             const numericEndMatch = path.match(/\/(\d+)\/?$/);
             if (numericEndMatch) {
                 const label = (link.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-                if (label === numericEndMatch[1] || label === 'page ' + numericEndMatch[1]) return true;
+                if (label === numericEndMatch[1] || label === 'page ' + numericEndMatch[1]) {
+                    return 'path ends in /' + numericEndMatch[1] + ' and the link is labelled with that same number';
+                }
             }
         }
-        return false;
+        return null;
     }
 
-    function isExceptionLink(link) {
-        if (!link.href) return false;
+    function matchedExceptionRule(link) {
+        if (!link.href) return null;
         const url = link.href.toLowerCase();
         const hostname = link.hostname.toLowerCase();
         const path = link.pathname.toLowerCase();
 
         // Always-on suffix exceptions: links ending in these open normally.
         // e.g. Steam discussion pagination: …/?ctp=3 or …/?fp=2 (any page number).
-        if (/\/\?(ctp|fp)=\d+$/.test(url)) return true;
+        if (/\/\?(ctp|fp)=\d+$/.test(url)) return 'built-in rule: URL ends in ?ctp=N or ?fp=N';
 
-        return getExceptions().some(rule => {
-            const r = rule.toLowerCase();
+        const rule = getExceptions().find(entry => {
+            const r = entry.toLowerCase();
             const [ruleDomain, ...rulePathParts] = r.split('/');
             const rulePath = '/' + rulePathParts.join('/');
             if (hostname !== ruleDomain && !hostname.endsWith('.' + ruleDomain)) return false;
             if (rulePath !== '/' && !path.includes(rulePath)) return false;
             return true;
         });
+        return rule ? 'Link Exceptions entry "' + rule + '"' : null;
+    }
+
+    function isExceptionLink(link) {
+        return matchedExceptionRule(link) !== null;
     }
 
  /*   // NEW: Reddit "More replies / more comments" expanders
@@ -662,12 +1044,16 @@
     }
 }
 
-    function isPageExcepted() {
+    function matchedPageException() {
         const href = location.href.toLowerCase();
-        return getPageExceptions().some(prefix => {
+        return getPageExceptions().find(prefix => {
             const p = prefix.trim().toLowerCase();
             return p && href.startsWith(p);
-        });
+        }) || null;
+    }
+
+    function isPageExcepted() {
+        return matchedPageException() !== null;
     }
 
     function createIndicator() {
@@ -681,8 +1067,9 @@
         const circle = document.createElementNS(svgNS, 'circle');
         circle.setAttribute('cx', '7');
         circle.setAttribute('cy', '7');
-        circle.setAttribute('r', '7');
+        circle.setAttribute('r', '6');
         circle.setAttribute('fill', 'rgba(0,0,0,0.85)');
+        indicatorCircle = circle;
 
         const text = document.createElementNS(svgNS, 'text');
         text.setAttribute('x', '7');
@@ -718,6 +1105,14 @@
         // injected at document-end; re-add it once the framework has settled.
         if (!indicator || !indicator.isConnected) createIndicator();
         indicator.style.display = isEnabled() ? 'block' : 'none';
+        // Amber ring = click logging is on. Logging writes to GM storage on
+        // every link click, so it needs to be visible rather than something
+        // you leave running for weeks by accident.
+        if (indicatorCircle) {
+            const logging = isDiagLogging();
+            indicatorCircle.setAttribute('stroke', logging ? '#fab387' : 'none');
+            indicatorCircle.setAttribute('stroke-width', logging ? '2' : '0');
+        }
     }
 
     function safeUpdateIndicator() {
@@ -807,32 +1202,73 @@ function openInNewTab(url) {
     }
 }
 
+    // Every gate lives in one function so the diagnostics log and the live
+    // behaviour can never drift apart: the panel reports the exact branch the
+    // handler took, not a second implementation of the same rules.
+    // Order matches the original handler, so the first match is the real reason.
+    function classifyClick(e, link) {
+        const pageRule = matchedPageException();
+        if (pageRule) {
+            return { action: 'not-handled', reason: 'Script is dormant on this page (Page Exceptions)', rule: pageRule };
+        }
+        if (!isEnabled()) {
+            return {
+                action: 'not-handled',
+                reason: 'Script is OFF in this tab',
+                rule: matchedActiveSite()
+                    ? 'this site IS in Active Sites — press Alt+N, or reload the page'
+                    : location.hostname + ' is not in Active Sites; press Alt+N or add it'
+            };
+        }
+        if (e.defaultPrevented) {
+            return { action: 'not-handled', reason: 'Another listener called preventDefault() before this script saw the click', rule: 'a site script or another userscript handled it first' };
+        }
+        if (e.shiftKey || e.altKey) {
+            return { action: 'not-handled', reason: 'Shift or Alt was held, so the script stays out of the way' };
+        }
+
+        const exceptionRule = matchedExceptionRule(link);
+        if (exceptionRule) {
+            return { action: 'not-handled', reason: 'Link Exceptions rule matched', rule: exceptionRule };
+        }
+        if (!link.href || link.href.startsWith('javascript:')) {
+            return { action: 'not-handled', reason: 'No usable href (empty or javascript:)' };
+        }
+        if (isSamePageAnchor(link)) {
+            return { action: 'not-handled', reason: 'Anchor pointing at this same page' };
+        }
+        const download = downloadReason(link);
+        if (download) {
+            return { action: 'not-handled', reason: 'Looks like a download', rule: download };
+        }
+        const pagination = nextPageReason(link);
+        if (pagination) {
+            return { action: 'not-handled', reason: 'Treated as a pagination / sort control, which should reuse the tab', rule: pagination };
+        }
+        if (e.ctrlKey || e.metaKey) {
+            return { action: 'same-tab', reason: 'Ctrl/Cmd was held, which inverts the behaviour' };
+        }
+        return { action: 'new-tab', reason: 'Opened in a background tab' };
+    }
+
     document.addEventListener('click', e => {
-        if (isPageExcepted()) return;   // page in the "Page Exceptions" list — script stays dormant here
-        if (!isEnabled()) return;
-        if (e.defaultPrevented) return;
         if (e.button !== 0) return;
-        if (e.shiftKey || e.altKey) return;
 
         const link = e.target.closest('a[href]');
         if (!link) return;
 
-        if (isExceptionLink(link)) return;
-        if (!link.href || link.href.startsWith('javascript:')) return;
-        if (isSamePageAnchor(link)) return;
-        if (looksLikeDownload(link)) return;
-        if (isNextPageLink(link)) return;
+        const verdict = classifyClick(e, link);
+        if (isDiagLogging()) recordDiagEntry(link, verdict);
 
-        if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            e.stopPropagation();
-            window.location.href = link.href;
-            return;
-        }
+        if (verdict.action === 'not-handled') return;
 
         e.preventDefault();
         e.stopPropagation();
-        openInNewTab(link.href);
+        if (verdict.action === 'same-tab') {
+            window.location.href = link.href;
+        } else {
+            openInNewTab(link.href);
+        }
     }, true);
 
 })();
