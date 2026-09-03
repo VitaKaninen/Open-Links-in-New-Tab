@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.21.0
+// @version     1.22.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.21.0';
+    const SCRIPT_VERSION = '1.22.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -954,7 +954,10 @@
             }
             lines.push('Active Sites match: ' + (siteRule || 'none — ' + location.hostname + ' is not listed'));
             lines.push('Page Exceptions match: ' + (pageRule || 'none'));
-            lines.push('Tab placement: ' + (shouldInsertNext(location.href) ? 'next to this tab' : 'end of the tab bar'));
+            const placementRule = matchedTabPlacementSite();
+            lines.push('Tab placement: ' + (placementRule
+                ? 'next to this tab (rule "' + placementRule + '")'
+                : 'end of the tab bar — ' + location.hostname + ' is not in Tab Placement'));
             lines.push('List sizes: ' + getActiveSites().length + ' active sites, ' + getExceptions().length +
                        ' link exceptions, ' + getPageExceptions().length + ' page exceptions, ' +
                        getInsertNextSites().length + ' tab-placement sites');
@@ -993,8 +996,12 @@
             statusBox.appendChild(statusRow('Page Exceptions rule',
                 pageRule || 'none matched',
                 pageRule ? '#f38ba8' : '#cdd6f4'));
+            const placementRule = matchedTabPlacementSite();
             statusBox.appendChild(statusRow('Tab placement',
-                shouldInsertNext(location.href) ? 'next to this tab' : 'end of the tab bar'));
+                placementRule
+                    ? 'next to this tab (rule "' + placementRule + '")'
+                    : 'end of the tab bar — this hostname is not in Tab Placement',
+                placementRule ? '#a6e3a1' : '#cdd6f4'));
             const frames = frameReport();
             statusBox.appendChild(statusRow('Frames on page', frames,
                 /NOT running|cannot inspect/.test(frames) ? '#f9e2af' : '#cdd6f4'));
@@ -1409,16 +1416,24 @@
         ) return true;
     }*/
 
-  function shouldInsertNext(url) {
-    try {
-        const hostname = new URL(url).hostname.toLowerCase();
-        return getInsertNextSites().some(domain =>
+    // Tab Placement matches the page you are ON, not the link's destination —
+    // "new tabs opened FROM these sites". Matching the destination (v1.21.0 and
+    // earlier) silently broke every outbound link: listing reddit.com placed a
+    // reddit→reddit tab correctly but sent reddit→github.com to the end of the
+    // bar, while the diagnostics panel — which always asked about location.href
+    // — kept reporting "next to this tab". Returns the matching rule for the
+    // panel, so a near-miss ("www.reddit.com" listed while you're on
+    // "reddit.com") names itself instead of showing a bare no.
+    function matchedTabPlacementSite() {
+        const hostname = location.hostname.toLowerCase();
+        return getInsertNextSites().find(domain =>
             hostname === domain || hostname.endsWith('.' + domain)
-        );
-    } catch (_) {
-        return false;
+        ) || null;
     }
-}
+
+    function shouldInsertNext() {
+        return matchedTabPlacementSite() !== null;
+    }
 
     function matchedPageException() {
         const href = location.href.toLowerCase();
@@ -1567,15 +1582,22 @@
     removeBlankTargets();
  
 function openInNewTab(url) {
-    const insertNext = shouldInsertNext(url);
+    const insertNext = shouldInsertNext();
 
     try {
         if (typeof GM_openInTab === 'function') {
-            GM_openInTab(url, {
-                active: false,        // background
-                insert: insertNext,   // true = next to parent, false = end of tab bar
-                setParent: insertNext // Firefox: with no opener set, the tab goes to the end
-            });
+            // Tampermonkey documents `insert` as "an integer indicating the
+            // position at which the new tab should be inserted", defaulting to
+            // false = end of the strip; older builds took a plain boolean
+            // meaning "right after the current tab". Sending `true` covers the
+            // boolean reading, and omitting the key entirely (rather than
+            // sending false) leaves the default untouched for the other.
+            const opts = { active: false }; // background
+            if (insertNext) {
+                opts.insert = true;
+                opts.setParent = true; // treat the new tab as a child of this one
+            }
+            GM_openInTab(url, opts);
         } else {
             window.open(url, '_blank', 'noopener,noreferrer');
         }
