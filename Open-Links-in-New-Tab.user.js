@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.20.0
+// @version     1.21.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.20.0';
+    const SCRIPT_VERSION = '1.21.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -596,6 +596,12 @@
             // come out in the same order the panel shows.
             function saveSorted(items) {
                 cfg.saveItems(sortList(items));
+                // Adding the current host under Active Sites used to do nothing
+                // until a reload, because the only force-enable ran at init —
+                // so the panel looked like it had ignored the entry. Re-running
+                // it here is safe: it only ever turns the script ON, and only
+                // when a rule actually matches this page.
+                checkDefaultEnabled();
             }
 
             function renderList() {
@@ -1092,6 +1098,24 @@
         const controls = document.createElement('div');
         controls.style.cssText = 'display: flex; gap: 6px; align-items: center; flex-wrap: wrap; border-top: 1px solid #45475a; padding-top: 10px;';
 
+        // The panel's own way to turn the script on. Alt+N reaches the page
+        // through the keyboard, so a site that captures keydown at window level
+        // can eat it — leaving the panel telling you to press a key that does
+        // nothing. This button goes through no page code at all.
+        const stateToggle = makeButton('', '#89b4fa');
+        function paintStateToggle() {
+            const on = isEnabled();
+            stateToggle.textContent = on ? 'Script: ON' : 'Script: OFF — turn on';
+            stateToggle.style.background = on ? '#a6e3a1' : '#f38ba8';
+            stateToggle.style.color = '#1e1e2e';
+        }
+        stateToggle.title = 'Toggle the script for this tab (same as Alt+N)';
+        stateToggle.addEventListener('click', () => {
+            toggleEnabled();
+            paintStateToggle();
+            renderStatus();
+        });
+
         const logToggle = makeButton('', '#89b4fa');
         function paintToggle() {
             const mode = getDiagMode();
@@ -1109,7 +1133,7 @@
         });
 
         const refreshBtn = makeButton('Refresh', '#89b4fa');
-        refreshBtn.addEventListener('click', () => { renderStatus(); renderLog(); });
+        refreshBtn.addEventListener('click', () => { paintStateToggle(); renderStatus(); renderLog(); });
 
         const clearBtn = makeButton('Clear log', '#f38ba8');
         clearBtn.addEventListener('click', () => { clearDiagLog(); renderLog(); });
@@ -1173,6 +1197,7 @@
         const closeBtn = makeButton('Close', '#45475a', '#cdd6f4');
         closeBtn.addEventListener('click', () => { diagnosticsRefresh = null; host.remove(); });
 
+        controls.appendChild(stateToggle);
         controls.appendChild(logToggle);
         controls.appendChild(refreshBtn);
         controls.appendChild(clearBtn);
@@ -1181,12 +1206,14 @@
         controls.appendChild(closeBtn);
         controls.appendChild(copyStatus);
 
+        paintStateToggle();
         renderStatus();
         renderLog();
         // Lets the pageshow handler below repaint this panel after a
         // back/forward restore, when the stored log it is showing may be stale.
         diagnosticsRefresh = () => {
             if (!document.getElementById('gm-newtab-diagnostics')) return;
+            paintStateToggle();
             renderStatus();
             renderLog();
         };
@@ -1204,7 +1231,9 @@
 
     GM_registerMenuCommand('Settings', openSettingsPanel);
     GM_registerMenuCommand('Diagnose this page', openDiagnosticsPanel);
-	// GM_registerMenuCommand('Toggle for this tab', () => { toggleEnabled(); });
+    // Last resort when Alt+N cannot reach the page at all: the Tampermonkey
+    // menu runs outside the document, so no site listener can intercept it.
+    GM_registerMenuCommand('Toggle ON/OFF for this tab', () => { toggleEnabled(); });
 
   // ---------------- Insert Next-To-Parent ----------------
   // Domains whose new tabs open next to the parent are now managed in the
@@ -1499,18 +1528,23 @@
     // the framework has finished rendering.
     [400, 1200, 3000].forEach(t => setTimeout(safeUpdateIndicator, t));
 
-	let altDown = false;
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Alt') altDown = true;
-        if (altDown && e.code === 'KeyN') {
-            toggleEnabled();
-            e.preventDefault();
-        }
+    // Bound on `window`, in capture, for the same reason clicks are (v1.19.0):
+    // the capture path reaches window before document, so a site with a
+    // window-level keydown listener that calls stopPropagation() would keep a
+    // document-level shortcut from ever firing. That failure is silent and
+    // total — Alt+N simply does nothing, on every page of that site.
+    //
+    // The Alt state comes from e.altKey on the KeyN event itself, not from a
+    // latch set by a previous Alt keydown. The latch broke whenever the script
+    // never saw that keydown: the page swallowed it, the browser consumed it
+    // for the menu bar, or the tab was focused with Alt already held.
+    window.addEventListener('keydown', e => {
+        if (!e.altKey || e.code !== 'KeyN') return;
+        if (e.ctrlKey || e.metaKey) return;
+        if (isOwnUI(e)) return;   // typing in this script's own panels
+        toggleEnabled();
+        e.preventDefault();
     }, true);
-    document.addEventListener('keyup', e => {
-        if (e.key === 'Alt') altDown = false;
-    }, true);
-    window.addEventListener('blur', () => { altDown = false; }, true);
 
     const blankObserver = new MutationObserver(() => {
         debouncedRemove();
