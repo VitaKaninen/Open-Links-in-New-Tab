@@ -3,6 +3,22 @@
 Inherits the shared rules in `../CLAUDE.md` (version bumps, commit + push, click-collision
 and Trusted Types rules). Only what is specific to this script lives here.
 
+## Early capture cuts both ways — honour the click claim (v1.24.0)
+
+`classifyClick` has a gate, right after the `defaultPrevented` one: if `<html>` carries a fresh
+`data-userscript-click-claim`, another userscript declared during the **press** that the click is
+theirs, and this script stands aside. `foreignClickClaim()` is the reader; the contract, and why a
+timestamp rather than a flag, is in `../CLAUDE.md`.
+
+**This exists because v1.19.0's window-level early capture put this script ahead of a sibling's
+modal click mode.** Hover Zoom's preview window is pointer-transparent, so it floats over a link
+and the press that pins it is indistinguishable, at click time, from an ordinary link click — this
+script opened the tab, called `preventDefault()`, and Hover Zoom never got its pin. Reported
+2026-09-03 on imgur as "the click passes through", and it went away when this script was disabled.
+
+It is a gate in `classifyClick`, not a short-circuit in the handlers, for the usual reason: the
+diagnostics panel then *names* the reason instead of the click vanishing with no entry.
+
 ## `GM_openInTab`: send `insert` explicitly on every call — the docs lie about its default
 
 Tampermonkey documents `insert` as: "An integer indicating the position at which the new tab

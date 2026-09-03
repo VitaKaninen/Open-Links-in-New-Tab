@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.23.0
+// @version     1.24.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1605,6 +1605,39 @@ function openInNewTab(url) {
     }
 }
 
+    // ---------------------------------------------- the cross-userscript click claim
+    //
+    // Since v1.19.0 this script can intercept at window/capture, which beats every
+    // DOCUMENT-level listener — including another userscript's. That is the point on a site
+    // that shields its own clicks, but it also puts this script ahead of a sibling script's
+    // modal "the click belongs to my floating window" mode, and there is no ordering rule to
+    // appeal to: two window/capture listeners run in registration order, which the manager
+    // decides. Hover Zoom's preview is pointer-transparent, so its window sits over a link
+    // and the click reads as an ordinary link click right up until it isn't.
+    //
+    // MOUSEDOWN always precedes CLICK, and nothing here stops mousedown, so the press is a
+    // point every script reliably sees. A script that intends to consume the click stamps
+    // <html> with `data-userscript-click-claim` = Date.now() during the press; this reads it
+    // during the click. Order-independent by construction. The attribute is on `document`
+    // because that is the one object two sandboxed userscripts share with no @grant.
+    //
+    // Freshness, not clearing, is what bounds it: mouseup fires BEFORE click, so there is no
+    // event a claimant could clear it on without clearing it too early. Anything older than
+    // CLAIM_TTL is a leftover and is ignored.
+    const CLAIM_ATTR = 'data-userscript-click-claim';
+    const CLAIM_TTL = 1500;
+
+    function foreignClickClaim() {
+        try {
+            const raw = document.documentElement.getAttribute(CLAIM_ATTR);
+            if (!raw) return false;
+            const ts = Number(raw);
+            return Number.isFinite(ts) && Date.now() - ts < CLAIM_TTL;
+        } catch (_) {
+            return false;
+        }
+    }
+
     // Every gate lives in one function so the diagnostics log and the live
     // behaviour can never drift apart: the panel reports the exact branch the
     // handler took, not a second implementation of the same rules.
@@ -1625,6 +1658,9 @@ function openInNewTab(url) {
         }
         if (e.defaultPrevented) {
             return { action: 'not-handled', reason: 'Another listener called preventDefault() before this script saw the click', rule: 'a site script or another userscript handled it first' };
+        }
+        if (foreignClickClaim()) {
+            return { action: 'not-handled', reason: 'Another userscript claimed this click on mousedown', rule: 'data-userscript-click-claim was set on <html> by the press that started this click' };
         }
         if (e.shiftKey || e.altKey) {
             return { action: 'not-handled', reason: 'Shift or Alt was held, so the script stays out of the way' };
