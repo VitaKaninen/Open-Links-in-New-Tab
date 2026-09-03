@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.22.0
+// @version     1.23.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.22.0';
+    const SCRIPT_VERSION = '1.23.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1586,18 +1586,17 @@ function openInNewTab(url) {
 
     try {
         if (typeof GM_openInTab === 'function') {
-            // Tampermonkey documents `insert` as "an integer indicating the
-            // position at which the new tab should be inserted", defaulting to
-            // false = end of the strip; older builds took a plain boolean
-            // meaning "right after the current tab". Sending `true` covers the
-            // boolean reading, and omitting the key entirely (rather than
-            // sending false) leaves the default untouched for the other.
-            const opts = { active: false }; // background
-            if (insertNext) {
-                opts.insert = true;
-                opts.setParent = true; // treat the new tab as a child of this one
-            }
-            GM_openInTab(url, opts);
+            // ALWAYS send `insert` explicitly, both ways. Tampermonkey's docs
+            // claim "The default is false, which means the new tab will be
+            // added to the end of the tab strip" — that is wrong. v1.22.0
+            // omitted the key for non-placement sites on the strength of that
+            // sentence and every site started opening next to its parent, so
+            // the real default is truthy. Omission is not "end of the bar".
+            GM_openInTab(url, {
+                active: false,         // background
+                insert: insertNext,    // true = next to parent, false = end of tab bar
+                setParent: insertNext  // treat the new tab as a child of this one
+            });
         } else {
             window.open(url, '_blank', 'noopener,noreferrer');
         }
