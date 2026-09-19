@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.25.0
+// @version     1.26.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.25.0';
+    const SCRIPT_VERSION = '1.26.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1259,6 +1259,7 @@
         '[class*="page-nav" i]', '[class*="pagenav" i]', '[aria-label*="pagin" i]',
         'nav[aria-label*="page" i]', '[role="navigation"]'
     ].join(',');
+    const PAGE_NUMBER_LABEL = /^(page )?\d[\d,]*$/;
 
     let indicator = null;
     let indicatorCircle = null;
@@ -1317,6 +1318,17 @@
         return downloadReason(link) !== null;
     }
 
+    // Nearest ancestor (up to 4 levels, stopping at <body>) holding another bare-number link
+    function numberedSiblingLink(link) {
+        let scope = link.parentElement;
+        for (let depth = 0; scope && scope !== document.body && depth < 4; depth++, scope = scope.parentElement) {
+            const other = Array.from(scope.querySelectorAll('a[href]')).find(a =>
+                a !== link && PAGE_NUMBER_LABEL.test(a.textContent.replace(/\s+/g, ' ').trim().toLowerCase()));
+            if (other) return other.textContent.replace(/\s+/g, ' ').trim();
+        }
+        return null;
+    }
+
     function nextPageReason(link) {
         if (link.textContent) {
             // Collapse whitespace: nested markup (a <span> inside the <a>)
@@ -1347,8 +1359,13 @@
             const bare = text.replace(/^[«»‹›→←<>\s]+|[«»‹›→←<>\s]+$/g, '');
             if (bare !== text && validTexts.has(bare)) return 'link text "' + text + '" is "' + bare + '" wrapped in arrow glyphs';
             if (text.includes('more repl') || text.includes('more comment')) return 'link text contains "more replies"/"more comments"';
-            // A bare page number inside a pagination container, whatever the href shape
-            if (/^(page )?\d[\d,]*$/.test(text) && link.closest(PAGINATION_CONTAINERS)) return 'link is a bare number inside a pagination container';
+            // A bare page number is a page control when it sits in a pagination
+            // container or beside other bare-number links, whatever the href shape
+            if (PAGE_NUMBER_LABEL.test(text)) {
+                if (link.closest(PAGINATION_CONTAINERS)) return 'link is a bare number inside a pagination container';
+                const sibling = numberedSiblingLink(link);
+                if (sibling) return 'link is a bare number beside another bare-number link ("' + sibling + '")';
+            }
         }
 
         if (link.href) {
