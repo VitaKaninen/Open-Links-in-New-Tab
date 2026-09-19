@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.24.0
+// @version     1.25.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.23.0';
+    const SCRIPT_VERSION = '1.25.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1253,6 +1253,12 @@
         '.jpg', '.jpeg', '.png', '.gif', '.webp',
         '.mp3', '.mp4', '.mkv', '.avi'
     ];
+    // Ancestors that mark a numbered link as a page control
+    const PAGINATION_CONTAINERS = [
+        '[class*="pagin" i]', '[id*="pagin" i]', '[class*="pager" i]', '[id*="pager" i]',
+        '[class*="page-nav" i]', '[class*="pagenav" i]', '[aria-label*="pagin" i]',
+        'nav[aria-label*="page" i]', '[role="navigation"]'
+    ].join(',');
 
     let indicator = null;
     let indicatorCircle = null;
@@ -1337,7 +1343,12 @@
                 'refresh'
             ]);
             if (validTexts.has(text)) return 'link text "' + text + '" is in the pagination/sort-control word list';
+            // "« First", "Last »", "Next →": strip the arrow decoration and retry
+            const bare = text.replace(/^[«»‹›→←<>\s]+|[«»‹›→←<>\s]+$/g, '');
+            if (bare !== text && validTexts.has(bare)) return 'link text "' + text + '" is "' + bare + '" wrapped in arrow glyphs';
             if (text.includes('more repl') || text.includes('more comment')) return 'link text contains "more replies"/"more comments"';
+            // A bare page number inside a pagination container, whatever the href shape
+            if (/^(page )?\d[\d,]*$/.test(text) && link.closest(PAGINATION_CONTAINERS)) return 'link is a bare number inside a pagination container';
         }
 
         if (link.href) {
@@ -1369,12 +1380,13 @@
             // Whitespace is collapsed first — nested markup puts newlines and
             // indentation inside the anchor, so a raw trim() misses "\n  2\n".
             // "Page 2" counts too; it's still a number-labelled control.
+            // Zero-indexed bars label …/1 as "2", so N+1 counts as well.
             const numericEndMatch = path.match(/\/(\d+)\/?$/);
             if (numericEndMatch) {
-                const label = (link.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
-                if (label === numericEndMatch[1] || label === 'page ' + numericEndMatch[1]) {
-                    return 'path ends in /' + numericEndMatch[1] + ' and the link is labelled with that same number';
-                }
+                const label = (link.textContent || '').replace(/\s+/g, ' ').replace(/,/g, '').trim().toLowerCase().replace(/^page /, '');
+                const n = numericEndMatch[1];
+                if (label === n) return 'path ends in /' + n + ' and the link is labelled with that same number';
+                if (label === String(Number(n) + 1)) return 'path ends in /' + n + ' and the link is labelled ' + label + ' (zero-indexed pagination)';
             }
         }
         return null;
