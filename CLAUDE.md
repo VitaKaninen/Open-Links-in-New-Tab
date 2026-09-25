@@ -63,6 +63,12 @@ fills stay **presentation attributes** so Dark Reader can still recolour them (i
 `!important` fills would block that). `all: initial` on the `<svg>` also resets the inherited
 `pointer-events`, so it is set again there — without it the badge eats clicks in the corner.
 
+`safeUpdateIndicator`'s catch must **keep** the badge node. Nulling it, now that the observer
+watches `<html>` (where the badge lives), makes each re-created badge trigger the observer again —
+an endless loop that froze the tab in v1.27.0 whenever `updateIndicator` threw. The usual thrower
+was `sessionStorage`, which raises `SecurityError` on sites with storage blocked; `isEnabled`/
+`setEnabled` now fall back to an in-memory flag.
+
 ## Stripped `target="_blank"` is marked so it can be put back
 
 `removeBlankTargets` tags each link it strips with `data-olint-stripped-target`, and

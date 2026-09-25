@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.27.0
+// @version     1.28.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.27.0';
+    const SCRIPT_VERSION = '1.28.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1255,17 +1255,24 @@
     const PAGE_NUMBER_LABEL = /^(page )?\d[\d,]*$/;
 
     const STRIPPED_ATTR = 'data-olint-stripped-target';
+    let enabledFallback = false;
 
     let indicator = null;
     let indicatorCircle = null;
     let debounceTimer = null;
 
+    // sessionStorage throws on sites whose storage is blocked; fall back to this page's memory
     function isEnabled() {
-        return sessionStorage.getItem(STORAGE_KEY) === 'true';
+        try {
+            return sessionStorage.getItem(STORAGE_KEY) === 'true';
+        } catch (_) {
+            return enabledFallback;
+        }
     }
 
     function setEnabled(value) {
-        sessionStorage.setItem(STORAGE_KEY, value);
+        enabledFallback = !!value;
+        try { sessionStorage.setItem(STORAGE_KEY, value); } catch (_) { /* storage blocked */ }
         safeUpdateIndicator();
         if (value) removeBlankTargets(); else restoreBlankTargets();
     }
@@ -1506,8 +1513,9 @@
     function safeUpdateIndicator() {
         try {
             updateIndicator();
-        } catch (_) {
-            indicator = null;
+        } catch (err) {
+            // Keep the node: discarding it makes the <html> observer re-create it forever
+            console.warn('[Open Links in New Tab] indicator update failed:', err);
         }
     }
 
