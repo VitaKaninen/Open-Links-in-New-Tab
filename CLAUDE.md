@@ -53,6 +53,31 @@ now takes no argument so the two cannot diverge again.
 URL a rule matches, the panel will happily report the feature working while it is not. If a
 predicate can be asked about more than one URL, don't give it a URL parameter.
 
+## The indicator's N is a path — never go back to `<text>`
+
+A `<text>` N belongs to the page: any `svg text { font-size }` or `svg { width }` rule resizes it
+(measured: box 14→32 px, N 9→20 px Impact), and even untouched its baseline sat 0.45–0.9 px high
+depending on which font `system-ui` resolved to. The path is point-symmetric about the circle
+centre (7,7), so it is centred by construction. Geometry is locked with inline `!important`; the
+fills stay **presentation attributes** so Dark Reader can still recolour them (inline-style
+`!important` fills would block that). `all: initial` on the `<svg>` also resets the inherited
+`pointer-events`, so it is set again there — without it the badge eats clicks in the corner.
+
+## Stripped `target="_blank"` is marked so it can be put back
+
+`removeBlankTargets` tags each link it strips with `data-olint-stripped-target`, and
+`setEnabled(false)` restores them; without that, turning the script off left those links opening
+in the same tab. The observer watches `<html>`, not `<body>`: a framework that swaps `<body>` out
+leaves a body observer attached to a dead node.
+
+## Testing in the built-in browser
+
+Harness: an HTML page that defines `GM_getValue`/`GM_setValue`/`GM_registerMenuCommand`/
+`GM_openInTab`/`unsafeWindow` stubs, then loads the `.user.js` with a `<script src>`. Serve it over
+localhost (`python -m http.server` via a `.claude/launch.json` + `preview_start`) — a local file
+outside the project opens in the pane as a static snapshot the JS tools refuse to touch. Measure
+with `getBBox()`/`getBoundingClientRect()`; screenshots are off-limits.
+
 ## Verify browser-extension behaviour in a real browser, not from docs
 
 Both bugs above were shipped in one commit: one proven by reading the code, one guessed from the

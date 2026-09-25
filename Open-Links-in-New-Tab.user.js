@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.26.0
+// @version     1.27.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.26.0';
+    const SCRIPT_VERSION = '1.27.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -48,7 +48,7 @@
         try { return JSON.parse(stored); } catch (_) { return []; }
     }
 
-	function saveActiveSites(list) {
+    function saveActiveSites(list) {
         GM_setValue(SITES_KEY, JSON.stringify(list));
     }
 
@@ -596,12 +596,7 @@
             // come out in the same order the panel shows.
             function saveSorted(items) {
                 cfg.saveItems(sortList(items));
-                // Adding the current host under Active Sites used to do nothing
-                // until a reload, because the only force-enable ran at init —
-                // so the panel looked like it had ignored the entry. Re-running
-                // it here is safe: it only ever turns the script ON, and only
-                // when a rule actually matches this page.
-                checkDefaultEnabled();
+                if (cfg.afterSave) cfg.afterSave();
             }
 
             function renderList() {
@@ -798,6 +793,8 @@
             exportFilename: 'open-links-new-tab_active-sites.txt',
             getItems: getActiveSites,
             saveItems: saveActiveSites,
+            // Takes effect without a reload; only this list, or any list edit re-enables an Alt+N'd-off tab
+            afterSave: checkDefaultEnabled,
             normalize: raw => raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0],
             currentValue: () => location.hostname.toLowerCase()
         });
@@ -846,7 +843,7 @@
         tabPlacementSection.style.display = 'none';
 
         const earlyCaptureSection = buildSection({
-            description: 'Sites where this script grabs clicks one step earlier (at window level). Needed when a site shields its own click handling with stopPropagation, which otherwise kills the click before this script sees it. Added automatically when that is detected — remove an entry if it causes trouble.',
+            description: 'Sites where this script grabs clicks one step earlier (at window level). Needed when a site shields its own click handling with stopPropagation, which otherwise kills the click before this script sees it. When that is detected, the Diagnose panel\'s log suggests adding the site — remove an entry if it causes trouble.',
             examples: 'Examples: example.com, app.example.org',
             placeholder: 'e.g. example.com',
             addCurrentLabel: '+ This Site',
@@ -1242,10 +1239,6 @@
     // menu runs outside the document, so no site listener can intercept it.
     GM_registerMenuCommand('Toggle ON/OFF for this tab', () => { toggleEnabled(); });
 
-  // ---------------- Insert Next-To-Parent ----------------
-  // Domains whose new tabs open next to the parent are now managed in the
-  // "Tab Placement" settings tab (see getInsertNextSites / shouldInsertNext).
-
     const DOWNLOAD_EXTENSIONS = [
         '.zip', '.rar', '.7z', '.exe', '.msi',
         '.pdf', '.doc', '.docx', '.xls', '.xlsx',
@@ -1261,6 +1254,8 @@
     ].join(',');
     const PAGE_NUMBER_LABEL = /^(page )?\d[\d,]*$/;
 
+    const STRIPPED_ATTR = 'data-olint-stripped-target';
+
     let indicator = null;
     let indicatorCircle = null;
     let debounceTimer = null;
@@ -1272,6 +1267,7 @@
     function setEnabled(value) {
         sessionStorage.setItem(STORAGE_KEY, value);
         safeUpdateIndicator();
+        if (value) removeBlankTargets(); else restoreBlankTargets();
     }
 
     function toggleEnabled() {
@@ -1302,7 +1298,8 @@
         if (raw === '#' || raw.endsWith('/#') || link.href.endsWith('#')) return true;
         return link.hash &&
             link.origin === location.origin &&
-            link.pathname === location.pathname;
+            link.pathname === location.pathname &&
+            link.search === location.search;
     }
 
     // Each of these returns the rule that matched (a string, for diagnostics)
@@ -1312,10 +1309,6 @@
         if (link.hasAttribute('download')) return 'the <a> carries a download attribute';
         const ext = DOWNLOAD_EXTENSIONS.find(x => link.pathname.toLowerCase().endsWith(x));
         return ext ? 'path ends in ' + ext : null;
-    }
-
-    function looksLikeDownload(link) {
-        return downloadReason(link) !== null;
     }
 
     // Nearest ancestor (up to 4 levels, stopping at <body>) holding another bare-number link
@@ -1409,7 +1402,7 @@
         return null;
     }
 
-    function matchedExceptionRule(link) {
+    function matchedExceptionRule(link, exceptions = getExceptions()) {
         if (!link.href) return null;
         const url = link.href.toLowerCase();
         const hostname = link.hostname.toLowerCase();
@@ -1419,7 +1412,7 @@
         // e.g. Steam discussion pagination: …/?ctp=3 or …/?fp=2 (any page number).
         if (/\/\?(ctp|fp)=\d+$/.test(url)) return 'built-in rule: URL ends in ?ctp=N or ?fp=N';
 
-        const rule = getExceptions().find(entry => {
+        const rule = exceptions.find(entry => {
             const r = entry.toLowerCase();
             const [ruleDomain, ...rulePathParts] = r.split('/');
             const rulePath = '/' + rulePathParts.join('/');
@@ -1429,21 +1422,6 @@
         });
         return rule ? 'Link Exceptions entry "' + rule + '"' : null;
     }
-
-    function isExceptionLink(link) {
-        return matchedExceptionRule(link) !== null;
-    }
-
- /*   // NEW: Reddit "More replies / more comments" expanders
-    if (hostname.includes('reddit.com')) {
-        const text = link.textContent.trim().toLowerCase();
-        if (
-            text.includes('more repl') ||
-            text.includes('more comment') ||
-            link.classList.contains('morecomments') ||
-            link.closest('.morecomments')
-        ) return true;
-    }*/
 
     // Tab Placement matches the page you are ON, not the link's destination —
     // "new tabs opened FROM these sites". Matching the destination (v1.21.0 and
@@ -1476,6 +1454,7 @@
         return matchedPageException() !== null;
     }
 
+    // Builds the corner badge; the N is a path, not text, so page fonts and CSS cannot move it
     function createIndicator() {
         const svgNS = 'http://www.w3.org/2000/svg';
         indicator = document.createElement('div');
@@ -1483,6 +1462,8 @@
         svg.setAttribute('width', '14');
         svg.setAttribute('height', '14');
         svg.setAttribute('viewBox', '0 0 14 14');
+        // all:initial also resets the inherited pointer-events, so it is set again here
+        svg.style.cssText = 'all: initial !important; display: block !important; width: 14px !important; height: 14px !important; pointer-events: none !important;';
 
         const circle = document.createElementNS(svgNS, 'circle');
         circle.setAttribute('cx', '7');
@@ -1491,30 +1472,16 @@
         circle.setAttribute('fill', 'rgba(0,0,0,0.85)');
         indicatorCircle = circle;
 
-        const text = document.createElementNS(svgNS, 'text');
-        text.setAttribute('x', '7');
-        text.setAttribute('y', '9.5');
-        text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('font-size', '9');
-        text.setAttribute('font-weight', '600');
-        text.setAttribute('fill', 'blue');
-        text.setAttribute('font-family', 'system-ui, sans-serif');
-        text.textContent = 'N';
+        // Point-symmetric about (7,7), so it is centred in the circle by construction
+        const glyph = document.createElementNS(svgNS, 'path');
+        glyph.setAttribute('d', 'M4.4 10.2V3.8H6L8.2 7.71V3.8H9.6V10.2H8L5.8 6.29V10.2Z');
+        glyph.setAttribute('fill', 'blue');
 
         svg.appendChild(circle);
-        svg.appendChild(text);
+        svg.appendChild(glyph);
         indicator.appendChild(svg);
 
-        indicator.style.cssText = `
-            all: initial;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 14px;
-            height: 14px;
-            z-index: 2147483647;
-            pointer-events: none;
-        `;
+        indicator.style.cssText = 'all: initial !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 14px !important; height: 14px !important; z-index: 2147483647 !important; pointer-events: none !important;';
         document.documentElement.appendChild(indicator);
     }
 
@@ -1524,7 +1491,7 @@
         // hydrates the full document with React) discard the indicator we
         // injected at document-end; re-add it once the framework has settled.
         if (!indicator || !indicator.isConnected) createIndicator();
-        indicator.style.display = isEnabled() ? 'block' : 'none';
+        indicator.style.setProperty('display', isEnabled() ? 'block' : 'none', 'important');
         // Amber ring = click logging is on. Logging writes to GM storage on
         // every link click, so it needs to be visible rather than something
         // you leave running for weeks by accident.
@@ -1551,10 +1518,20 @@
         // target makes them open in the same tab even though the click handler
         // below never fires to reopen them in a new one.
         if (!isEnabled() || isPageExcepted()) return;
+        const exceptions = getExceptions();
         document.querySelectorAll('a[target="_blank"]').forEach(link => {
-            if (!isExceptionLink(link)) {
+            if (!matchedExceptionRule(link, exceptions)) {
                 link.removeAttribute('target');
+                link.setAttribute(STRIPPED_ATTR, '');
             }
+        });
+    }
+
+    // Puts back every target="_blank" removeBlankTargets took, for when the script is switched off
+    function restoreBlankTargets() {
+        document.querySelectorAll('a[' + STRIPPED_ATTR + ']').forEach(link => {
+            link.setAttribute('target', '_blank');
+            link.removeAttribute(STRIPPED_ATTR);
         });
     }
 
@@ -1595,44 +1572,31 @@
         // Re-add the indicator if a framework re-render tore it out.
         if (!indicator || !indicator.isConnected) safeUpdateIndicator();
     });
-    if (document.body) {
-        blankObserver.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-    } else {
-        document.addEventListener('DOMContentLoaded', () => {
-            blankObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-        });
-    }
+    // <html>, not <body>: a framework that swaps out <body> would leave a body observer watching a dead node
+    blankObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true
+    });
     removeBlankTargets();
- 
-function openInNewTab(url) {
-    const insertNext = shouldInsertNext();
 
-    try {
-        if (typeof GM_openInTab === 'function') {
-            // ALWAYS send `insert` explicitly, both ways. Tampermonkey's docs
-            // claim "The default is false, which means the new tab will be
-            // added to the end of the tab strip" — that is wrong. v1.22.0
-            // omitted the key for non-placement sites on the strength of that
-            // sentence and every site started opening next to its parent, so
-            // the real default is truthy. Omission is not "end of the bar".
-            GM_openInTab(url, {
-                active: false,         // background
-                insert: insertNext,    // true = next to parent, false = end of tab bar
-                setParent: insertNext  // treat the new tab as a child of this one
-            });
-        } else {
+    function openInNewTab(url) {
+        const insertNext = shouldInsertNext();
+
+        try {
+            if (typeof GM_openInTab === 'function') {
+                // Always send insert both ways: omitting it is NOT "end of tab bar" (see CLAUDE.md)
+                GM_openInTab(url, {
+                    active: false,         // background
+                    insert: insertNext,    // true = next to parent, false = end of tab bar
+                    setParent: insertNext  // treat the new tab as a child of this one
+                });
+            } else {
+                window.open(url, '_blank', 'noopener,noreferrer');
+            }
+        } catch (_) {
             window.open(url, '_blank', 'noopener,noreferrer');
         }
-    } catch (_) {
-        window.open(url, '_blank', 'noopener,noreferrer');
     }
-}
 
     // ---------------------------------------------- the cross-userscript click claim
     //
@@ -1719,9 +1683,6 @@ function openInNewTab(url) {
         return { action: 'new-tab', reason: 'Opened in a background tab' };
     }
 
-    // Registered on window, in capture: it runs ahead of every document-level
-    // listener, including this script's own, so it observes clicks that never
-    // make it as far as the handler below.
     // Back/forward restores this page from the bfcache with its JavaScript heap
     // intact, and the userscript manager's in-page copy of GM storage comes back
     // with it — holding whatever the log looked like before we navigated away.
@@ -1735,6 +1696,7 @@ function openInNewTab(url) {
         }, delay));
     });
 
+    // Window capture runs ahead of every document listener, so the probe sees clicks that never reach the handler
     window.addEventListener('click', probeClick, true);
     window.addEventListener('mousedown', probeMousedown, true);
     markProbeAlive();
