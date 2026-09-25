@@ -90,6 +90,12 @@ leaves a body observer attached to a dead node.
   wildcard, and the link's query is compared only when the rule contains `?` — otherwise
   `site.com/login` would catch `?next=/login`.
 
+Nexus download flow (checked logged in, 2026-09-24): after `?tab=files&file_id=N` the page's
+"Slow download" is a `<button>` inside the `<mod-file-download>` shadow root, and the modal's
+Manual/Vortex links sit inside `<mod-download-modal>`'s shadow root. The script reaches neither
+(it only acts on `a[href]` found by `closest()` from the retargeted host), so any tab the CDN
+download opens is Nexus's own doing.
+
 ## Testing in the built-in browser
 
 Harness: an HTML page that defines `GM_getValue`/`GM_setValue`/`GM_registerMenuCommand`/
