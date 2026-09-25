@@ -76,6 +76,20 @@ was `sessionStorage`, which raises `SecurityError` on sites with storage blocked
 in the same tab. The observer watches `<html>`, not `<body>`: a framework that swaps `<body>` out
 leaves a body observer attached to a dead node.
 
+## Same-tab rules that look like they could be simpler
+
+- **`?p=N`** is pagination only when the link is labelled N (or N+1). WordPress (`/?p=123`) and
+  phpBB (`viewtopic.php?p=123`) use it for post ids.
+- **View switch** (`sameViewReason`): same path as this page and the *link* carries `tab`/`sort`/
+  `order`/`view` → same tab (Nexus `?tab=files`, `&file_id=` download buttons). Link side only: on
+  one-file forums (`index.php?topic=N`) testing the current page's query too would keep every topic
+  link in the same tab once the listing is sorted.
+- **Download extensions** are only types the browser saves; images, PDF, txt, mp3/mp4 display in a
+  tab and so open in a new one.
+- **Link Exceptions**: the path part matches as a substring (users rely on it — keep it), `*` is a
+  wildcard, and the link's query is compared only when the rule contains `?` — otherwise
+  `site.com/login` would catch `?next=/login`.
+
 ## Testing in the built-in browser
 
 Harness: an HTML page that defines `GM_getValue`/`GM_setValue`/`GM_registerMenuCommand`/

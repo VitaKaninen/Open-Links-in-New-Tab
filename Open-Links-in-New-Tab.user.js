@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.28.0
+// @version     1.29.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.28.0';
+    const SCRIPT_VERSION = '1.29.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1239,13 +1239,14 @@
     // menu runs outside the document, so no site listener can intercept it.
     GM_registerMenuCommand('Toggle ON/OFF for this tab', () => { toggleEnabled(); });
 
+    // Only files the browser saves; images, PDFs, text and mp3/mp4 display in a tab, so they open in a new one
     const DOWNLOAD_EXTENSIONS = [
         '.zip', '.rar', '.7z', '.exe', '.msi',
-        '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-        '.ppt', '.pptx', '.csv', '.txt',
-        '.jpg', '.jpeg', '.png', '.gif', '.webp',
-        '.mp3', '.mp4', '.mkv', '.avi'
+        '.doc', '.docx', '.xls', '.xlsx',
+        '.ppt', '.pptx', '.csv', '.mkv', '.avi'
     ];
+    // Query keys that switch what the current page shows rather than going somewhere else
+    const VIEW_KEYS = ['tab', 'sort', 'order', 'view'];
     // Ancestors that mark a numbered link as a page control
     const PAGINATION_CONTAINERS = [
         '[class*="pagin" i]', '[id*="pagin" i]', '[class*="pager" i]', '[id*="pager" i]',
@@ -1307,6 +1308,16 @@
             link.origin === location.origin &&
             link.pathname === location.pathname &&
             link.search === location.search;
+    }
+
+    // Same address as this page apart from the query, where the link carries a VIEW_KEYS key (?tab=files)
+    function sameViewReason(link) {
+        if (link.origin !== location.origin || link.pathname !== location.pathname) return null;
+        if (link.search === location.search) return 'link goes to this same page';
+        // Link side only: on one-file forums (index.php?topic=N) a sorted current page would catch every topic
+        const params = new URLSearchParams(link.search);
+        const key = VIEW_KEYS.find(k => params.has(k));
+        return key ? 'same path as this page; the query carries ?' + key + '=' : null;
     }
 
     // Each of these returns the rule that matched (a string, for diagnostics)
@@ -1375,7 +1386,13 @@
             // follows the page number (…/page/3/?s=searchterm, …/new/2#top).
             const path = (link.pathname || '').toLowerCase();
 
-            if (/[?&](page|paged|p|pg|start|offset)=\d+(?:[&#]|$)/.test(url)) return 'query string carries a page number (?page=N / ?p=N / ?offset=N …)';
+            if (/[?&](page|paged|pg|start|offset)=\d+(?:[&#]|$)/.test(url)) return 'query string carries a page number (?page=N / ?offset=N …)';
+            // ?p=N is also a post id (WordPress, phpBB), so it needs the link labelled with that number
+            const pMatch = url.match(/[?&]p=(\d+)(?:[&#]|$)/);
+            if (pMatch) {
+                const label = (link.textContent || '').replace(/\s+/g, ' ').replace(/,/g, '').trim().toLowerCase().replace(/^page /, '');
+                if (label === pMatch[1] || label === String(Number(pMatch[1]) + 1)) return 'query string has ?p=' + pMatch[1] + ' and the link is labelled ' + label;
+            }
             if (/[?&][^=]*-page=\d+(?:[&#]|$)/.test(url)) return 'query string carries a prefixed page number (?something-page=N)';
             if (/\/(page|p)\/\d+\/?$/.test(path)) return 'path ends in /page/N';
             // page2 / page-2 / page_2 / page2.html — the separator between the
@@ -1424,8 +1441,12 @@
             const [ruleDomain, ...rulePathParts] = r.split('/');
             const rulePath = '/' + rulePathParts.join('/');
             if (hostname !== ruleDomain && !hostname.endsWith('.' + ruleDomain)) return false;
-            if (rulePath !== '/' && !path.includes(rulePath)) return false;
-            return true;
+            if (rulePath === '/') return true;
+            // The query only counts when the rule names one; * matches anything
+            const target = rulePath.includes('?') ? path + link.search.toLowerCase() : path;
+            if (!rulePath.includes('*')) return target.includes(rulePath);
+            const pattern = rulePath.split('*').map(s => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*');
+            return new RegExp(pattern).test(target);
         });
         return rule ? 'Link Exceptions entry "' + rule + '"' : null;
     }
@@ -1676,6 +1697,10 @@
         }
         if (isSamePageAnchor(link)) {
             return { action: 'not-handled', reason: 'Anchor pointing at this same page' };
+        }
+        const view = sameViewReason(link);
+        if (view) {
+            return { action: 'not-handled', reason: 'Same page, different view — reuses the tab', rule: view };
         }
         const download = downloadReason(link);
         if (download) {
