@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.29.0
+// @version     1.30.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.29.0';
+    const SCRIPT_VERSION = '1.30.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1235,6 +1235,20 @@
 
     GM_registerMenuCommand('Settings', openSettingsPanel);
     GM_registerMenuCommand('Diagnose this page', openDiagnosticsPanel);
+    GM_registerMenuCommand('Add this page to Link Exceptions', addCurrentPageToExceptions);
+
+    // Adds hostname+path of this page to Link Exceptions, same form as the panel's "+ This Page"
+    function addCurrentPageToExceptions() {
+        const entry = (location.hostname + location.pathname).toLowerCase().replace(/\/$/, '');
+        const list = getExceptions();
+        if (list.includes(entry)) {
+            alert('Open Links in New Tab: "' + entry + '" is already in Link Exceptions.');
+            return;
+        }
+        list.push(entry);
+        saveExceptions(list);
+        alert('Open Links in New Tab: added "' + entry + '" to Link Exceptions.');
+    }
     // Last resort when Alt+N cannot reach the page at all: the Tampermonkey
     // menu runs outside the document, so no site listener can intercept it.
     GM_registerMenuCommand('Toggle ON/OFF for this tab', () => { toggleEnabled(); });
