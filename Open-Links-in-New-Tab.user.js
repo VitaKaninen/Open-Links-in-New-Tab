@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.30.0
+// @version     1.31.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,7 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.30.0';
+    const SCRIPT_VERSION = '1.31.0';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1242,12 +1242,25 @@
         const entry = (location.hostname + location.pathname).toLowerCase().replace(/\/$/, '');
         const list = getExceptions();
         if (list.includes(entry)) {
-            alert('Open Links in New Tab: "' + entry + '" is already in Link Exceptions.');
+            showToast('Already in Link Exceptions: ' + entry);
             return;
         }
         list.push(entry);
         saveExceptions(list);
-        alert('Open Links in New Tab: added "' + entry + '" to Link Exceptions.');
+        showToast('Added to Link Exceptions: ' + entry);
+    }
+
+    // Brief message that fades out on its own after 2 s
+    function showToast(msg) {
+        const host = document.createElement('div');
+        host.style.cssText = 'all: initial !important; position: fixed !important; top: 16px !important; left: 50% !important; transform: translateX(-50%) !important; z-index: 2147483647 !important; pointer-events: none !important;';
+        const box = document.createElement('div');
+        box.textContent = msg;
+        box.style.cssText = 'background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-left: 4px solid #a6e3a1; border-radius: 6px; padding: 8px 14px; font: 13px system-ui, sans-serif; box-shadow: 0 4px 12px rgba(0,0,0,0.4); opacity: 1; transition: opacity 0.4s;';
+        host.attachShadow({ mode: 'open' }).appendChild(box);
+        document.documentElement.appendChild(host);
+        setTimeout(() => { box.style.opacity = '0'; }, 2000);
+        setTimeout(() => { host.remove(); }, 2400);
     }
     // Last resort when Alt+N cannot reach the page at all: the Tampermonkey
     // menu runs outside the document, so no site listener can intercept it.
