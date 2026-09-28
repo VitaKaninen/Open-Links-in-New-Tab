@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.31.0
+// @version     1.32.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1376,8 +1376,8 @@
             const validTexts = new Set([
                 'next', 'more', 'older', 'previous', 'prev',
                 'next page', 'previous page', 'older posts', 'newer posts',
-                'read more', 'load more posts', 'go to next page',
-                'view older posts', 'continue reading', 'next article',
+                'load more posts', 'go to next page',
+                'view older posts', 'next article',
                 'next ›', 'previous ›', 'next →', 'previous →',
                 'next >>', 'previous >>', '›', '→', '>>', '»',
                 'prev ‹', 'previous ‹', '‹', '←', '<<', '«',

@@ -84,6 +84,9 @@ leaves a body observer attached to a dead node.
   `order`/`view` → same tab (Nexus `?tab=files`, `&file_id=` download buttons). Link side only: on
   one-file forums (`index.php?topic=N`) testing the current page's query too would keep every topic
   link in the same tab once the listing is sorted.
+- **"Read more" / "continue reading"** are not in the pagination word list on purpose: they lead
+  to an article (acidcow's "Read more »"), and the arrow-strip in `nextPageReason` makes any such
+  word match its decorated form too. Removed in v1.32.0.
 - **Download extensions** are only types the browser saves; images, PDF, txt, mp3/mp4 display in a
   tab and so open in a new one.
 - **Link Exceptions**: the path part matches as a substring (users rely on it — keep it), `*` is a
