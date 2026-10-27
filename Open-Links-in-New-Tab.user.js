@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.33.0
+// @version     1.34.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -892,6 +892,10 @@
         panel.appendChild(tabBar);
         panel.appendChild(tabContents);
         panel.appendChild(closeBtn);
+        const verLine = document.createElement('div');
+        verLine.textContent = 'v' + SCRIPT_VERSION;
+        verLine.style.cssText = 'align-self: flex-end; color: #6c7086; font-size: 11px;';
+        panel.appendChild(verLine);
         document.documentElement.appendChild(host);
     }
 
