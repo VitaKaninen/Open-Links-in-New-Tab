@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.32.0
+// @version     1.33.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -17,7 +17,8 @@
 
 (function() {
     'use strict';
-    const SCRIPT_VERSION = '1.31.0';
+    // Read from the header so the two can't drift apart
+    const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '?';
     const STORAGE_KEY = 'forceNewTabEnabled';
     const SITES_KEY = 'activeSites';
     const EXCEPTIONS_KEY = 'linkExceptions';
@@ -1640,12 +1641,11 @@
 
         try {
             if (typeof GM_openInTab === 'function') {
-                // Always send insert both ways: omitting it is NOT "end of tab bar" (see CLAUDE.md)
-                GM_openInTab(url, {
-                    active: false,         // background
-                    insert: insertNext,    // true = next to parent, false = end of tab bar
-                    setParent: insertNext  // treat the new tab as a child of this one
-                });
+                // insert:false is required for end-of-bar; omitting it is NOT the same (see CLAUDE.md)
+                // TEST v1.33.0: placement sites omit insert so the browser keeps child tabs in order
+                GM_openInTab(url, insertNext
+                    ? { active: false, setParent: true }
+                    : { active: false, insert: false, setParent: false });
             } else {
                 window.open(url, '_blank', 'noopener,noreferrer');
             }

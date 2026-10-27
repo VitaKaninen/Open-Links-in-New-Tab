@@ -33,6 +33,16 @@ no hardcoded handling anywhere in the script. v1.23.0 restored the explicit `ins
 it stopped. So `insert: false` and no `insert` are **not** the same thing; always pass the
 boolean both ways.
 
+**Open experiment (v1.33.0, cleanup owed):** Tab Placement sites now *omit* `insert` (with
+`setParent: true`), hoping the browser's related-tab placement keeps successive child tabs in
+order instead of `insert: true` stacking them in reverse. Measurement: open 3 links from a
+placement site — order A B C after the parent = keep; C B A = revert to `insert: true`. A
+userscript cannot see the tab bar, so "after the last same-domain tab" is not implementable.
+Non-placement sites still send `insert: false`.
+
+`SCRIPT_VERSION` reads `GM_info.script.version`; never hardcode it again (it drifted to 1.31.0
+under a 1.32.0 header).
+
 Type drift to watch: `insert` is documented as an integer today but historically took a boolean
 meaning "right after the current tab". Booleans still behave as the boolean. Do not "modernise"
 it to an index without testing in a real browser — an integer is an *absolute* tab-strip
