@@ -33,19 +33,18 @@ no hardcoded handling anywhere in the script. v1.23.0 restored the explicit `ins
 it stopped. So `insert: false` and no `insert` are **not** the same thing; always pass the
 boolean both ways.
 
-**In-order Tab Placement — open experiment, cleanup owed.** Goal: successive child tabs keep link
-order (A B C) instead of `insert: true` stacking them C B A. A userscript cannot see the tab bar,
-so "after the last same-domain tab" is not implementable. Failed in the user's browser:
+**In-order Tab Placement is unsolved; placement sites use `insert: true` (C B A order).** Goal
+was A B C. A userscript cannot see the tab bar, so "after the last same-domain tab" is not
+implementable. Failed in the user's browser — do not retry:
 - omit `insert` + `setParent: true` (v1.33.0) → next to the parent (Tampermonkey's real default
   is `insert: true`).
 - `insert: false` + `setParent: true` (v1.35.0) → end of the bar; the opener alone places nothing.
-- Just-in-time `target="_blank"` on the real click: rejected by the user (foreground tab).
-Testing (v1.37.0): `openViaBrowser` dispatches a synthetic ctrl/cmd-click on a hidden
-`target="_blank"` anchor; `syntheticLink` makes our own listeners ignore it. Background tabs in
-order = keep (remove the TEST comment). Foreground tab = browser ignores the faked modifier →
-revert placement sites to `GM_openInTab` with `insert: true`. The built-in browser pane cannot
-judge this: it folds every new-tab link, even a trusted `target="_blank"` click, into the
-current tab. Harness: `.claude/harness.html` + `launch.json` (untracked).
+- synthetic ctrl-click on a hidden `target="_blank"` anchor (v1.37.0) → background, but end of
+  the bar; the browser does not treat a script's click as a related tab.
+- just-in-time `target="_blank"` on the real click: rejected by the user (foreground tab).
+The built-in browser pane cannot judge tab placement: it folds every new-tab link, even a trusted
+`target="_blank"` click, into the current tab. Harness: `.claude/harness.html` + `launch.json`
+(untracked).
 
 `SCRIPT_VERSION` reads `GM_info.script.version`; never hardcode it again.
 
