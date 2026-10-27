@@ -33,15 +33,14 @@ no hardcoded handling anywhere in the script. v1.23.0 restored the explicit `ins
 it stopped. So `insert: false` and no `insert` are **not** the same thing; always pass the
 boolean both ways.
 
-**In-order Tab Placement — open experiment, cleanup owed.** Goal: successive child tabs keep
-link order (A B C) instead of `insert: true` stacking them C B A. A userscript cannot see the tab
-bar, so "after the last same-domain tab" is not implementable.
-- Failed: omitting `insert` + `setParent: true` (v1.33.0) — still next to the parent, so
-  Tampermonkey's real default is `insert: true`.
-- Testing (v1.35.0): `insert: false` + `setParent: true` — no index, only the opener. A B C after
-  the parent = keep; end of bar = revert placement sites to `insert: true`.
-- Next if that fails: let the browser open it natively (synthetic ctrl/middle-click on the link,
-  ignored by our own listener) — unverified whether browsers honour it.
+**In-order Tab Placement is unsolved.** Goal: successive child tabs keep link order (A B C)
+instead of `insert: true` stacking them C B A. A userscript cannot see the tab bar, so "after
+the last same-domain tab" is not implementable. Tested in the user's browser, both failed:
+- omit `insert` + `setParent: true` (v1.33.0) → next to the parent (Tampermonkey's real default
+  is `insert: true`).
+- `insert: false` + `setParent: true` (v1.35.0) → end of the bar; the opener alone places nothing.
+Untried: letting the browser open the link natively (just-in-time `target="_blank"` — in order but
+foreground; or a synthetic ctrl/middle-click — unverified, may navigate the current tab instead).
 
 `SCRIPT_VERSION` reads `GM_info.script.version`; never hardcode it again.
 

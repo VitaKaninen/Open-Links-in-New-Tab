@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.35.0
+// @version     1.36.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1646,8 +1646,7 @@
         try {
             if (typeof GM_openInTab === 'function') {
                 // insert:false is required for end-of-bar; omitting it is NOT the same (see CLAUDE.md)
-                // TEST v1.35.0: placement sites send no index, only the parent, so the browser places them
-                GM_openInTab(url, { active: false, insert: false, setParent: insertNext });
+                GM_openInTab(url, { active: false, insert: insertNext, setParent: insertNext });
             } else {
                 window.open(url, '_blank', 'noopener,noreferrer');
             }
