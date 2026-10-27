@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.36.0
+// @version     1.37.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -328,6 +328,7 @@
     }
 
     function probeClick(e) {
+        if (e.target === syntheticLink) return;
         clickSeenToken = mousedownToken; // before the mode check: mousedown probe needs this either way
         const deep = getDiagMode() === 'deep';
         const button = e.button;
@@ -1640,11 +1641,35 @@
     });
     removeBlankTargets();
 
+    let syntheticLink = null;
+
+    // Ctrl/Cmd-clicks a hidden link so the browser opens the background tab itself, keeping link order
+    function openViaBrowser(url) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';   // if the faked modifier is ignored: a foreground tab, not this page navigating away
+        a.style.display = 'none';
+        const mac = /Mac|iP(hone|ad|od)/.test(navigator.platform || '');
+        syntheticLink = a;
+        document.documentElement.appendChild(a);
+        try {
+            a.dispatchEvent(new MouseEvent('click', {
+                bubbles: true, cancelable: true, button: 0, ctrlKey: !mac, metaKey: mac
+            }));
+        } finally {
+            a.remove();
+            syntheticLink = null;
+        }
+    }
+
     function openInNewTab(url) {
         const insertNext = shouldInsertNext();
 
         try {
-            if (typeof GM_openInTab === 'function') {
+            if (insertNext) {
+                // TEST v1.37.0: Tab Placement via a simulated ctrl-click (see CLAUDE.md)
+                openViaBrowser(url);
+            } else if (typeof GM_openInTab === 'function') {
                 // insert:false is required for end-of-bar; omitting it is NOT the same (see CLAUDE.md)
                 GM_openInTab(url, { active: false, insert: insertNext, setParent: insertNext });
             } else {
@@ -1764,6 +1789,7 @@
 
     // Shared by both entry points so the two can never drift apart.
     function actOnClick(e, link) {
+        if (e.target === syntheticLink) return;   // our own simulated ctrl-click, or it would be re-handled as "same tab"
         let verdict;
         try {
             verdict = classifyClick(e, link);

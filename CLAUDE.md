@@ -33,14 +33,19 @@ no hardcoded handling anywhere in the script. v1.23.0 restored the explicit `ins
 it stopped. So `insert: false` and no `insert` are **not** the same thing; always pass the
 boolean both ways.
 
-**In-order Tab Placement is unsolved.** Goal: successive child tabs keep link order (A B C)
-instead of `insert: true` stacking them C B A. A userscript cannot see the tab bar, so "after
-the last same-domain tab" is not implementable. Tested in the user's browser, both failed:
+**In-order Tab Placement — open experiment, cleanup owed.** Goal: successive child tabs keep link
+order (A B C) instead of `insert: true` stacking them C B A. A userscript cannot see the tab bar,
+so "after the last same-domain tab" is not implementable. Failed in the user's browser:
 - omit `insert` + `setParent: true` (v1.33.0) → next to the parent (Tampermonkey's real default
   is `insert: true`).
 - `insert: false` + `setParent: true` (v1.35.0) → end of the bar; the opener alone places nothing.
-Untried: letting the browser open the link natively (just-in-time `target="_blank"` — in order but
-foreground; or a synthetic ctrl/middle-click — unverified, may navigate the current tab instead).
+- Just-in-time `target="_blank"` on the real click: rejected by the user (foreground tab).
+Testing (v1.37.0): `openViaBrowser` dispatches a synthetic ctrl/cmd-click on a hidden
+`target="_blank"` anchor; `syntheticLink` makes our own listeners ignore it. Background tabs in
+order = keep (remove the TEST comment). Foreground tab = browser ignores the faked modifier →
+revert placement sites to `GM_openInTab` with `insert: true`. The built-in browser pane cannot
+judge this: it folds every new-tab link, even a trusted `target="_blank"` click, into the
+current tab. Harness: `.claude/harness.html` + `launch.json` (untracked).
 
 `SCRIPT_VERSION` reads `GM_info.script.version`; never hardcode it again.
 
