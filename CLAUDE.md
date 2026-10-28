@@ -52,7 +52,7 @@ The built-in browser pane cannot judge tab placement: it folds every new-tab lin
 
 ## Alt+N: `e.altKey` OR a held-Alt latch — keep both
 The user's browser reports `altKey: false` on the KeyN keydown while Alt is held (YouTube,
-2026-10-28), so `e.altKey` alone never fires there. A latch alone (pre-v1.20-era) failed whenever
+2026-10-28), so `e.altKey` alone never fires there. A latch alone (an earlier version) failed whenever
 the script missed the Alt keydown (page swallowed it, tab focused with Alt held). OR'd, either
 path suffices; `blur` clears the latch. Listener stays on `window` capture so a site's window
 `stopPropagation()` can't hide it.
