@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.39.0
+// @version     1.40.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1643,7 +1643,8 @@
         try {
             if (typeof GM_openInTab === 'function') {
                 // insert:false is required for end-of-bar; omitting it is NOT the same (see CLAUDE.md)
-                GM_openInTab(url, { active: false, insert: insertNext, setParent: insertNext });
+                // test: parent only, browser's related-tab setting places it (see CLAUDE.md)
+                GM_openInTab(url, { active: false, insert: false, setParent: insertNext });
             } else {
                 window.open(url, '_blank', 'noopener,noreferrer');
             }

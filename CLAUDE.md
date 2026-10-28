@@ -42,8 +42,10 @@ implementable. Failed in the user's browser — do not retry:
 - synthetic ctrl-click on a hidden `target="_blank"` anchor (v1.37.0) → background, but end of
   the bar; the browser does not treat a script's click as a related tab.
 - just-in-time `target="_blank"` on the real click: rejected by the user (foreground tab).
-- The user's browser puts even a real middle-click at the end of the bar (2026-10-28), so no
-  native path gives in-order placement there either. Closed.
+- Real middle-clicks went to the end because the browser's `browser.tabs.insertRelatedAfterCurrent`
+  was off. With it on (2026-10-28) middle-clicks open A B C; script still C B A on v1.39.0.
+- **Retest in progress (v1.40.0):** `insert: false` + `setParent: true` with that setting on. If
+  tabs land A B C, keep it; if at the end, revert to `insert: insertNext` (v1.39.0) and close this.
 The built-in browser pane cannot judge tab placement: it folds every new-tab link, even a trusted
 `target="_blank"` click, into the current tab. Harness: `.claude/harness.html` + `launch.json`
 (untracked).
