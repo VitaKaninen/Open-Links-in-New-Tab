@@ -1642,8 +1642,7 @@
 
         try {
             if (typeof GM_openInTab === 'function') {
-                // insert:false is required for end-of-bar; omitting it is NOT the same (see CLAUDE.md)
-                // test: parent only, browser's related-tab setting places it (see CLAUDE.md)
+                // always insert:false (omitting = insert:true); setParent lets the browser place it in order (see CLAUDE.md)
                 GM_openInTab(url, { active: false, insert: false, setParent: insertNext });
             } else {
                 window.open(url, '_blank', 'noopener,noreferrer');

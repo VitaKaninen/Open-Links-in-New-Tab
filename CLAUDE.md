@@ -33,19 +33,13 @@ no hardcoded handling anywhere in the script. v1.23.0 restored the explicit `ins
 it stopped. So `insert: false` and no `insert` are **not** the same thing; always pass the
 boolean both ways.
 
-**In-order Tab Placement is unsolved; placement sites use `insert: true` (C B A order).** Goal
-was A B C. A userscript cannot see the tab bar, so "after the last same-domain tab" is not
-implementable. Failed in the user's browser — do not retry:
-- omit `insert` + `setParent: true` (v1.33.0) → next to the parent (Tampermonkey's real default
-  is `insert: true`).
-- `insert: false` + `setParent: true` (v1.35.0) → end of the bar; the opener alone places nothing.
-- synthetic ctrl-click on a hidden `target="_blank"` anchor (v1.37.0) → background, but end of
-  the bar; the browser does not treat a script's click as a related tab.
-- just-in-time `target="_blank"` on the real click: rejected by the user (foreground tab).
-- Real middle-clicks went to the end because the browser's `browser.tabs.insertRelatedAfterCurrent`
-  was off. With it on (2026-10-28) middle-clicks open A B C; script still C B A on v1.39.0.
-- **Retest in progress (v1.40.0):** `insert: false` + `setParent: true` with that setting on. If
-  tabs land A B C, keep it; if at the end, revert to `insert: insertNext` (v1.39.0) and close this.
+**Tab Placement = `insert: false` + `setParent: true`; the browser places it (A B C in order).**
+Confirmed by the user 2026-10-28 (v1.40.0). It depends on the browser's
+`browser.tabs.insertRelatedAfterCurrent` being on: with it off the same call lands at the end of
+the bar (seen v1.35.0), which is not a script bug — point the user at that setting. Do not switch
+to `insert: true`: Tampermonkey then computes "parent + 1" itself and tabs stack C B A. Rejected
+alternatives: synthetic ctrl-click on a hidden anchor (end of bar, not a related tab);
+just-in-time `target="_blank"` (foreground tab).
 The built-in browser pane cannot judge tab placement: it folds every new-tab link, even a trusted
 `target="_blank"` click, into the current tab. Harness: `.claude/harness.html` + `launch.json`
 (untracked).
