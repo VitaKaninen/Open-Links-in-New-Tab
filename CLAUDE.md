@@ -42,6 +42,8 @@ implementable. Failed in the user's browser — do not retry:
 - synthetic ctrl-click on a hidden `target="_blank"` anchor (v1.37.0) → background, but end of
   the bar; the browser does not treat a script's click as a related tab.
 - just-in-time `target="_blank"` on the real click: rejected by the user (foreground tab).
+- The user's browser puts even a real middle-click at the end of the bar (2026-10-28), so no
+  native path gives in-order placement there either. Closed.
 The built-in browser pane cannot judge tab placement: it folds every new-tab link, even a trusted
 `target="_blank"` click, into the current tab. Harness: `.claude/harness.html` + `launch.json`
 (untracked).
