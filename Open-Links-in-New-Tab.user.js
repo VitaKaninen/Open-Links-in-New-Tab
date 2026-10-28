@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.38.0
+// @version     1.39.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1610,18 +1610,15 @@
     // the framework has finished rendering.
     [400, 1200, 3000].forEach(t => setTimeout(safeUpdateIndicator, t));
 
-    // Bound on `window`, in capture, for the same reason clicks are (v1.19.0):
-    // the capture path reaches window before document, so a site with a
-    // window-level keydown listener that calls stopPropagation() would keep a
-    // document-level shortcut from ever firing. That failure is silent and
-    // total — Alt+N simply does nothing, on every page of that site.
-    //
-    // The Alt state comes from e.altKey on the KeyN event itself, not from a
-    // latch set by a previous Alt keydown. The latch broke whenever the script
-    // never saw that keydown: the page swallowed it, the browser consumed it
-    // for the menu bar, or the tab was focused with Alt already held.
+    // Alt+N toggle on window capture; Alt = e.altKey OR a held-Alt latch (see CLAUDE.md)
+    let altHeld = false;
+    const isAltKey = e => e.key === 'Alt' || e.key === 'AltGraph' || e.code === 'AltLeft' || e.code === 'AltRight';
+    window.addEventListener('keydown', e => { if (isAltKey(e)) altHeld = true; }, true);
+    window.addEventListener('keyup', e => { if (isAltKey(e)) altHeld = false; }, true);
+    window.addEventListener('blur', () => { altHeld = false; });
+
     window.addEventListener('keydown', e => {
-        if (!e.altKey || e.code !== 'KeyN') return;
+        if (!(e.altKey || altHeld) || e.code !== 'KeyN') return;
         if (e.ctrlKey || e.metaKey) return;
         if (isOwnUI(e)) return;   // typing in this script's own panels
         toggleEnabled();
