@@ -40,6 +40,12 @@ the bar (seen v1.35.0), which is not a script bug — point the user at that set
 to `insert: true`: Tampermonkey then computes "parent + 1" itself and tabs stack C B A. Rejected
 alternatives: synthetic ctrl-click on a hidden anchor (end of bar, not a related tab);
 just-in-time `target="_blank"` (foreground tab).
+With that setting on, `insert: false` + `setParent: false` *also* lands next to the parent in order
+(user, YouTube, 2026-10-29), so non-placement sites need an explicit end position.
+**Test in progress (v1.41.0):** non-placement sites send `insert: 9999` (an index, which the
+browser clamps to the end). Measurement: 3 clicks from the leftmost tab on YouTube → at the far
+right in order = keep; next to the parent C B A = Tampermonkey treats it as boolean `true`; next
+to the parent A B C = ignored. If not kept, revert to `insert: false` for both and record it here.
 The built-in browser pane cannot judge tab placement: it folds every new-tab link, even a trusted
 `target="_blank"` click, into the current tab. Harness: `.claude/harness.html` + `launch.json`
 (untracked).

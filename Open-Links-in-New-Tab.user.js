@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.40.0
+// @version     1.41.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1642,8 +1642,10 @@
 
         try {
             if (typeof GM_openInTab === 'function') {
-                // always insert:false (omitting = insert:true); setParent lets the browser place it in order (see CLAUDE.md)
-                GM_openInTab(url, { active: false, insert: false, setParent: insertNext });
+                // placement: insert:false + parent, browser orders it; others: test index 9999 = end of bar (see CLAUDE.md)
+                GM_openInTab(url, insertNext
+                    ? { active: false, insert: false, setParent: true }
+                    : { active: false, insert: 9999, setParent: false });
             } else {
                 window.open(url, '_blank', 'noopener,noreferrer');
             }
