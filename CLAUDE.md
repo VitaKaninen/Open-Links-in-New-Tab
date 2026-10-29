@@ -41,11 +41,11 @@ to `insert: true`: Tampermonkey then computes "parent + 1" itself and tabs stack
 alternatives: synthetic ctrl-click on a hidden anchor (end of bar, not a related tab);
 just-in-time `target="_blank"` (foreground tab).
 With that setting on, `insert: false` + `setParent: false` *also* lands next to the parent in order
-(user, YouTube, 2026-10-29), so non-placement sites need an explicit end position.
-**Test in progress (v1.41.0):** non-placement sites send `insert: 9999` (an index, which the
-browser clamps to the end). Measurement: 3 clicks from the leftmost tab on YouTube → at the far
-right in order = keep; next to the parent C B A = Tampermonkey treats it as boolean `true`; next
-to the parent A B C = ignored. If not kept, revert to `insert: false` for both and record it here.
+(user, YouTube, 2026-10-29): Tampermonkey's tabs count as related whatever `setParent` says.
+An integer `insert` is no way out — `insert: 9999` (v1.41.0) gave next-to-parent C B A, i.e.
+Tampermonkey treats any number as `true`. So with the setting on, every site places in order;
+with it off, `insert: false` sites go to the end. No userscript call gives both; that needs an
+extension with the tabs API.
 The built-in browser pane cannot judge tab placement: it folds every new-tab link, even a trusted
 `target="_blank"` click, into the current tab. Harness: `.claude/harness.html` + `launch.json`
 (untracked).
