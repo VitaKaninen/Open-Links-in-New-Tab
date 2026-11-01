@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.43.0
+// @version     1.44.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1263,10 +1263,12 @@
             menuIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (_) { /* gone already */ } });
         }
         menuIds = [];
-        const add = (label, fn) => menuIds.push(GM_registerMenuCommand(label, fn));
+        const add = (label, fn, opts) => menuIds.push(GM_registerMenuCommand(label, fn, opts));
         add('Settings', openSettingsPanel);
-        if (matchedActiveSite()) add('Disable for this site', disableForThisSite);
-        else add('Enable for this site', enableForThisSite);
+        // autoClose false: the popup stays open and shows the flipped label as confirmation
+        const keepOpen = { autoClose: false };
+        if (matchedActiveSite()) add('Disable for this site', disableForThisSite, keepOpen);
+        else add('Enable for this site', enableForThisSite, keepOpen);
         add('Add this page to Link Exceptions', addCurrentPageToExceptions);
         if (GM_getValue(DIAG_MENU_KEY, false) === true) add('Diagnose this page', openDiagnosticsPanel);
     }
