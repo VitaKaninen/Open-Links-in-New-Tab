@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.44.0
+// @version     1.45.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -812,6 +812,7 @@
             exportFilename: 'open-links-new-tab_link-exceptions.txt',
             getItems: getExceptions,
             saveItems: saveExceptions,
+            afterSave: buildMenu,
             normalize: raw => raw.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, ''),
             currentValue: () => (location.hostname + location.pathname).toLowerCase().replace(/\/$/, '')
         });
@@ -1269,7 +1270,8 @@
         const keepOpen = { autoClose: false };
         if (matchedActiveSite()) add('Disable for this site', disableForThisSite, keepOpen);
         else add('Enable for this site', enableForThisSite, keepOpen);
-        add('Add this page to Link Exceptions', addCurrentPageToExceptions);
+        if (getExceptions().includes(currentPageEntry())) add('Remove this page from Link Exceptions', removeCurrentPageFromExceptions, keepOpen);
+        else add('Add this page to Link Exceptions', addCurrentPageToExceptions, keepOpen);
         if (GM_getValue(DIAG_MENU_KEY, false) === true) add('Diagnose this page', openDiagnosticsPanel);
     }
 
@@ -1294,17 +1296,26 @@
         showToast('Disabled for ' + (rule || location.hostname.toLowerCase()));
     }
 
-    // Adds hostname+path of this page to Link Exceptions, same form as the panel's "+ This Page"
+    // This page as a Link Exceptions entry, same form as the panel's "+ This Page"
+    function currentPageEntry() {
+        return (location.hostname + location.pathname).toLowerCase().replace(/\/$/, '');
+    }
+
+    // Adds this page to Link Exceptions
     function addCurrentPageToExceptions() {
-        const entry = (location.hostname + location.pathname).toLowerCase().replace(/\/$/, '');
+        const entry = currentPageEntry();
         const list = getExceptions();
-        if (list.includes(entry)) {
-            showToast('Already in Link Exceptions: ' + entry);
-            return;
-        }
-        list.push(entry);
-        saveExceptions(list);
+        if (!list.includes(entry)) { list.push(entry); saveExceptions(sortList(list)); }
+        buildMenu();
         showToast('Added to Link Exceptions: ' + entry);
+    }
+
+    // Removes this page's exact entry from Link Exceptions
+    function removeCurrentPageFromExceptions() {
+        const entry = currentPageEntry();
+        saveExceptions(getExceptions().filter(e => e !== entry));
+        buildMenu();
+        showToast('Removed from Link Exceptions: ' + entry);
     }
 
     // Brief message that fades out on its own after 2 s
