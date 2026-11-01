@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.42.0
+// @version     1.43.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -9,6 +9,7 @@
 // @grant       GM_setValue
 // @grant       GM_getValue
 // @grant       GM_registerMenuCommand
+// @grant       GM_unregisterMenuCommand
 // @grant       unsafeWindow
 // @run-at      document-end
 // @downloadURL  https://raw.githubusercontent.com/VitaKaninen/Open-Links-in-New-Tab/main/Open-Links-in-New-Tab.user.js
@@ -29,6 +30,7 @@
     const DIAG_MODE_KEY = 'diagnosticMode';
     const DIAG_LOG_KEY = 'diagnosticLog';
     const DIAG_LOG_MAX = 40;
+    const DIAG_MENU_KEY = 'showDiagnoseMenu';
 
     // The script only *acts* in the top frame, but a click inside an iframe is
     // invisible to the top-frame handler — which in the panel looks exactly
@@ -795,7 +797,7 @@
             getItems: getActiveSites,
             saveItems: saveActiveSites,
             // Takes effect without a reload; only this list, or any list edit re-enables an Alt+N'd-off tab
-            afterSave: checkDefaultEnabled,
+            afterSave: () => { checkDefaultEnabled(); buildMenu(); },
             normalize: raw => raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0],
             currentValue: () => location.hostname.toLowerCase()
         });
@@ -889,8 +891,24 @@
         `;
         closeBtn.addEventListener('click', () => host.remove());
 
+        const diagRow = document.createElement('label');
+        diagRow.style.cssText = 'display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; margin-top: 4px;';
+        const diagCheck = document.createElement('input');
+        diagCheck.type = 'checkbox';
+        diagCheck.checked = GM_getValue(DIAG_MENU_KEY, false) === true;
+        diagCheck.style.cssText = 'accent-color: #89b4fa; margin: 0; cursor: pointer;';
+        diagCheck.addEventListener('change', () => {
+            GM_setValue(DIAG_MENU_KEY, diagCheck.checked);
+            buildMenu();
+        });
+        const diagText = document.createElement('span');
+        diagText.textContent = 'Show "Diagnose this page" in the script menu';
+        diagRow.appendChild(diagCheck);
+        diagRow.appendChild(diagText);
+
         panel.appendChild(tabBar);
         panel.appendChild(tabContents);
+        panel.appendChild(diagRow);
         panel.appendChild(closeBtn);
         const verLine = document.createElement('div');
         verLine.textContent = 'v' + SCRIPT_VERSION;
@@ -1238,9 +1256,41 @@
         document.documentElement.appendChild(host);
     }
 
-    GM_registerMenuCommand('Settings', openSettingsPanel);
-    GM_registerMenuCommand('Diagnose this page', openDiagnosticsPanel);
-    GM_registerMenuCommand('Add this page to Link Exceptions', addCurrentPageToExceptions);
+    // (Re)registers the menu so the site item names the current state; order stays fixed
+    let menuIds = [];
+    function buildMenu() {
+        if (typeof GM_unregisterMenuCommand === 'function') {
+            menuIds.forEach(id => { try { GM_unregisterMenuCommand(id); } catch (_) { /* gone already */ } });
+        }
+        menuIds = [];
+        const add = (label, fn) => menuIds.push(GM_registerMenuCommand(label, fn));
+        add('Settings', openSettingsPanel);
+        if (matchedActiveSite()) add('Disable for this site', disableForThisSite);
+        else add('Enable for this site', enableForThisSite);
+        add('Add this page to Link Exceptions', addCurrentPageToExceptions);
+        if (GM_getValue(DIAG_MENU_KEY, false) === true) add('Diagnose this page', openDiagnosticsPanel);
+    }
+
+    buildMenu();
+
+    // Adds this hostname to Active Sites and turns the script on in this tab
+    function enableForThisSite() {
+        const host = location.hostname.toLowerCase();
+        const list = getActiveSites();
+        if (!list.includes(host)) { list.push(host); saveActiveSites(sortList(list)); }
+        setEnabled(true);
+        buildMenu();
+        showToast('Enabled for ' + host);
+    }
+
+    // Removes the Active Sites entry covering this page and turns the script off in this tab
+    function disableForThisSite() {
+        const rule = matchedActiveSite();
+        if (rule) saveActiveSites(getActiveSites().filter(d => d !== rule));
+        setEnabled(false);
+        buildMenu();
+        showToast('Disabled for ' + (rule || location.hostname.toLowerCase()));
+    }
 
     // Adds hostname+path of this page to Link Exceptions, same form as the panel's "+ This Page"
     function addCurrentPageToExceptions() {
@@ -1267,9 +1317,6 @@
         setTimeout(() => { box.style.opacity = '0'; }, 2000);
         setTimeout(() => { host.remove(); }, 2400);
     }
-    // Last resort when Alt+N cannot reach the page at all: the Tampermonkey
-    // menu runs outside the document, so no site listener can intercept it.
-    GM_registerMenuCommand('Toggle ON/OFF for this tab', () => { toggleEnabled(); });
 
     // Only files the browser saves; images, PDFs, text and mp3/mp4 display in a tab, so they open in a new one
     const DOWNLOAD_EXTENSIONS = [
