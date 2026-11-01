@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.45.0
+// @version     1.46.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1432,7 +1432,23 @@
         return null;
     }
 
+    // Icon-only prev/next arrows (<i class="fa fa-chevron-left">) judged by rel, aria-label/title and classes
+    function iconPagerReason(link) {
+        const rel = (link.getAttribute('rel') || '').toLowerCase();
+        if (/\b(next|prev)\b/.test(rel)) return 'link has rel="' + rel + '"';
+        if (link.textContent.trim()) return null;
+        const label = ((link.getAttribute('aria-label') || '') + ' ' + (link.getAttribute('title') || '')).trim().toLowerCase();
+        if (/\b(next|prev|previous|older|newer|pagination|pager)\b/.test(label)) return 'icon-only link labelled "' + label + '"';
+        const cls = ((link.getAttribute('class') || '') + ' ' + ((link.parentElement && link.parentElement.getAttribute('class')) || '')).toLowerCase();
+        if (/\b(next|prev|previous)\b/.test(cls)) return 'icon-only link with a prev/next class';
+        const icons = Array.from(link.querySelectorAll('[class]')).map(e => e.getAttribute('class')).join(' ').toLowerCase();
+        if (/chevron|arrow|angle|caret/.test(icons) && link.closest(PAGINATION_CONTAINERS)) return 'arrow icon inside a pagination container';
+        return null;
+    }
+
     function nextPageReason(link) {
+        const icon = iconPagerReason(link);
+        if (icon) return icon;
         if (link.textContent) {
             // Collapse whitespace: nested markup (a <span> inside the <a>)
             // puts newlines and indentation in textContent, so a bare trim()
