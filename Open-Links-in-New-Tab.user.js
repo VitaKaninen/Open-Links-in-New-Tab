@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name        Open Links in New Tab
 // @namespace   https://github.com/VitaKaninen
-// @version     1.46.0
+// @version     1.47.0
 // @author      VitaKaninen
 // @description Open links in a new tab (with exceptions & toggle)
 // @match       *://*/*
@@ -1266,12 +1266,10 @@
         menuIds = [];
         const add = (label, fn, opts) => menuIds.push(GM_registerMenuCommand(label, fn, opts));
         add('Settings', openSettingsPanel);
-        // autoClose false: the popup stays open and shows the flipped label as confirmation
-        const keepOpen = { autoClose: false };
-        if (matchedActiveSite()) add('Disable for this site', disableForThisSite, keepOpen);
-        else add('Enable for this site', enableForThisSite, keepOpen);
-        if (getExceptions().includes(currentPageEntry())) add('Remove this page from Link Exceptions', removeCurrentPageFromExceptions, keepOpen);
-        else add('Add this page to Link Exceptions', addCurrentPageToExceptions, keepOpen);
+        if (matchedActiveSite()) add('Disable for this site', disableForThisSite);
+        else add('Enable for this site', enableForThisSite);
+        if (getExceptions().includes(currentPageEntry())) add('Remove this page from Link Exceptions', removeCurrentPageFromExceptions);
+        else add('Add this page to Link Exceptions', addCurrentPageToExceptions);
         if (GM_getValue(DIAG_MENU_KEY, false) === true) add('Diagnose this page', openDiagnosticsPanel);
     }
 
@@ -1318,7 +1316,7 @@
         showToast('Removed from Link Exceptions: ' + entry);
     }
 
-    // Brief message that fades out on its own after 2 s
+    // Brief message that fades out on its own after 3 s
     function showToast(msg) {
         const host = document.createElement('div');
         host.style.cssText = 'all: initial !important; position: fixed !important; top: 16px !important; left: 50% !important; transform: translateX(-50%) !important; z-index: 2147483647 !important; pointer-events: none !important;';
@@ -1327,8 +1325,8 @@
         box.style.cssText = 'background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-left: 4px solid #a6e3a1; border-radius: 6px; padding: 8px 14px; font: 13px system-ui, sans-serif; box-shadow: 0 4px 12px rgba(0,0,0,0.4); opacity: 1; transition: opacity 0.4s;';
         host.attachShadow({ mode: 'open' }).appendChild(box);
         document.documentElement.appendChild(host);
-        setTimeout(() => { box.style.opacity = '0'; }, 2000);
-        setTimeout(() => { host.remove(); }, 2400);
+        setTimeout(() => { box.style.opacity = '0'; }, 3000);
+        setTimeout(() => { host.remove(); }, 3400);
     }
 
     // Only files the browser saves; images, PDFs, text and mp3/mp4 display in a tab, so they open in a new one
